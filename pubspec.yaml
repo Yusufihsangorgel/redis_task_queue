@@ -1,0 +1,26 @@
+name: redis_task_queue
+description: A small Redis-backed task queue for server-side Dart. Enqueue jobs and process them in a worker with retries, a dead-letter list, and weighted queues.
+version: 0.1.0
+repository: https://github.com/Yusufihsangorgel/redis_task_queue
+issue_tracker: https://github.com/Yusufihsangorgel/redis_task_queue/issues
+
+topics:
+  - redis
+  - queue
+  - jobs
+  - worker
+  - backend
+
+screenshots:
+  - description: The enqueue to worker path, with retries and a dead-letter list.
+    path: doc/cover.png
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  redis: ^4.0.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0
