@@ -11,6 +11,29 @@ Ruby, the model will feel familiar. Dart server frameworks (Serverpod,
 Dart Frog, Shelf) don't have a maintained equivalent, so this fills that gap
 with a deliberately small surface.
 
+The path a task takes, end to end:
+
+```mermaid
+---
+config:
+  look: handDrawn
+---
+flowchart LR
+    P["Producer<br/>client.enqueue(task, queue, maxRetries)"] -->|LPUSH| Q
+    subgraph Q["Redis lists — drained by weight"]
+      direction TB
+      C["critical &times;6"]
+      D["default &times;3"]
+      L["low &times;1"]
+    end
+    Q -->|"weighted BRPOP (1s block)"| W["Worker poll loop"]
+    W --> H["Handler for task.type"]
+    H -->|returns normally| DONE(["done"])
+    H -->|throws / no handler| R{"attempts left?"}
+    R -->|"yes — LPUSH back to same queue, attempt++"| Q
+    R -->|no| DL[["dead-letter list<br/>&lt;prefix&gt;:dead"]]
+```
+
 ## Why
 
 Anything slow or retryable — sending email, processing an upload, calling a
@@ -59,6 +82,25 @@ await worker.run();
 ```
 
 ## How it behaves
+
+A task moves through a small set of states — it either lands on `done` or, once
+retries are exhausted, on the dead-letter list:
+
+```mermaid
+---
+config:
+  look: handDrawn
+---
+stateDiagram-v2
+    [*] --> pending: enqueue / LPUSH
+    pending --> processing: worker weighted BRPOP
+    processing --> done: handler returns
+    processing --> retry: handler throws
+    retry --> pending: re-enqueue (attempt++)
+    retry --> deadLetter: attempt reached maxRetries
+    done --> [*]
+    deadLetter --> [*]
+```
 
 - **Weighted queues.** With `{'critical': 6, 'default': 3, 'low': 1}` the worker
   polls `critical` about six times as often as `low`, so a flood of low-priority
