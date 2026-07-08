@@ -12,11 +12,34 @@ final _port = int.parse(
 );
 const _prefix = 'rtq_test';
 
-Future<void> _flush() async {
+// Redis key layout the tests inspect directly, mirroring lib/src/keys.dart.
+String _pendingKey(String queue) => '$_prefix:queue:$queue';
+String _delayedKey(String queue) => '$_prefix:queue:$queue:delayed';
+const _deadKey = '$_prefix:dead';
+
+Future<Command> _connect() async {
   final conn = RedisConnection();
-  final cmd = await conn.connect(_host, _port);
+  return conn.connect(_host, _port);
+}
+
+Future<void> _flush() async {
+  final cmd = await _connect();
   await cmd.send_object(['FLUSHDB']);
   await cmd.get_connection().close();
+}
+
+/// Polls [check] every 50ms until it returns true or [timeout] elapses.
+/// Returns whether it became true, so callers can assert on the result.
+Future<bool> _pollUntil(
+  FutureOr<bool> Function() check, {
+  Duration timeout = const Duration(seconds: 8),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    if (await check()) return true;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+  return false;
 }
 
 void main() {
@@ -45,15 +68,106 @@ void main() {
     await worker.close();
   });
 
-  test('a failing task lands in the dead-letter list after maxRetries',
+  test('a failed task waits in the delayed set, not pending, before retry',
       () async {
     final client =
         await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    // A long base backoff so the task stays in the delayed set long enough to
+    // observe it there (the mover won't promote it for a minute).
     final worker = await Worker.connect(
       host: _host,
       port: _port,
       prefix: _prefix,
       queues: {'default': 1},
+      backoffBase: const Duration(seconds: 60),
+      backoffJitter: 0,
+    );
+
+    worker.handle('boom', (_) => throw StateError('always fails'));
+    final loop = worker.run();
+
+    await client.enqueue(Task('boom', {}), maxRetries: 5);
+
+    final inspect = await _connect();
+    // Wait until the worker has processed the task once and parked it in the
+    // delayed set.
+    final landed = await _pollUntil(() async {
+      final n = await inspect.send_object(['ZCARD', _delayedKey('default')]);
+      return (n as int) == 1;
+    });
+    expect(landed, isTrue, reason: 'failed task should land in the delayed set');
+
+    // It must NOT be back on the pending list yet.
+    final pending =
+        await inspect.send_object(['LLEN', _pendingKey('default')]) as int;
+    expect(pending, 0, reason: 'a backed-off retry must not be pending yet');
+
+    // ...and its score must be in the future (the backoff hasn't elapsed).
+    final withScores = await inspect.send_object(
+      ['ZRANGE', _delayedKey('default'), '0', '-1', 'WITHSCORES'],
+    ) as List;
+    final score = int.parse(withScores[1] as String);
+    expect(
+      score,
+      greaterThan(DateTime.now().millisecondsSinceEpoch),
+      reason: 'the delayed task should be scheduled for the future',
+    );
+
+    worker.stop();
+    await loop.timeout(const Duration(seconds: 3));
+    await inspect.get_connection().close();
+    await client.close();
+    await worker.close();
+  });
+
+  test('the due-mover promotes a delayed task and the worker reprocesses it',
+      () async {
+    final client =
+        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    // Small base so the backoff elapses quickly and the test stays fast.
+    final worker = await Worker.connect(
+      host: _host,
+      port: _port,
+      prefix: _prefix,
+      queues: {'default': 1},
+      backoffBase: const Duration(milliseconds: 50),
+      backoffJitter: 0,
+    );
+
+    var attempts = 0;
+    final succeeded = Completer<void>();
+    worker.handle('flaky', (_) {
+      attempts++;
+      if (attempts == 1) throw StateError('fails once');
+      succeeded.complete(); // second run succeeds
+    });
+    final loop = worker.run();
+
+    await client.enqueue(Task('flaky', {}), maxRetries: 5);
+
+    // The first run fails, the task waits out its backoff in the delayed set,
+    // the mover promotes it, and the second run succeeds.
+    await succeeded.future.timeout(const Duration(seconds: 8));
+    expect(attempts, 2, reason: 'task should be reprocessed exactly once');
+
+    worker.stop();
+    await loop.timeout(const Duration(seconds: 3));
+    await client.close();
+    await worker.close();
+  });
+
+  test('a failing task lands in the dead-letter list after maxRetries',
+      () async {
+    final client =
+        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    // Small base keeps the two backed-off retries fast and deterministic.
+    final worker = await Worker.connect(
+      host: _host,
+      port: _port,
+      prefix: _prefix,
+      queues: {'default': 1},
+      backoffBase: const Duration(milliseconds: 30),
+      backoffJitter: 0,
     );
 
     var attempts = 0;
@@ -66,20 +180,22 @@ void main() {
     await client.enqueue(Task('boom', {}), maxRetries: 2);
 
     // Poll the dead-letter list until the envelope shows up.
-    final conn = RedisConnection();
-    final cmd = await conn.connect(_host, _port);
+    final inspect = await _connect();
     String? dead;
-    for (var i = 0; i < 50 && dead == null; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      dead = await cmd.send_object(['RPOP', '$_prefix:dead']) as String?;
-    }
+    await _pollUntil(
+      () async {
+        dead = await inspect.send_object(['RPOP', _deadKey]) as String?;
+        return dead != null;
+      },
+      timeout: const Duration(seconds: 10),
+    );
 
     expect(dead, isNotNull, reason: 'envelope should reach the dead-letter list');
     expect(attempts, greaterThanOrEqualTo(3)); // initial + 2 retries
 
     worker.stop();
     await loop.timeout(const Duration(seconds: 3));
-    await cmd.get_connection().close();
+    await inspect.get_connection().close();
     await client.close();
     await worker.close();
   });

@@ -30,7 +30,8 @@ flowchart LR
     W --> H["Handler for task.type"]
     H -->|returns normally| DONE(["done"])
     H -->|throws / no handler| R{"attempts left?"}
-    R -->|"yes — LPUSH back to same queue, attempt++"| Q
+    R -->|"yes — ZADD with backoff, attempt++"| Z[["delayed set<br/>&lt;prefix&gt;:&lt;queue&gt;:delayed"]]
+    Z -->|"due-mover: score &le; now &rarr; LPUSH"| Q
     R -->|no| DL[["dead-letter list<br/>&lt;prefix&gt;:dead"]]
 ```
 
@@ -49,7 +50,7 @@ either succeeds or lands in the dead-letter list.
 
 ```yaml
 dependencies:
-  redis_task_queue: ^0.1.0
+  redis_task_queue: ^0.2.0
 ```
 
 ## Enqueue (from your request path)
@@ -71,6 +72,11 @@ await client.enqueue(
 ```dart
 final worker = await Worker.connect(
   queues: {'critical': 6, 'default': 3, 'low': 1},
+  // Optional — these are the defaults. The first retry waits backoffBase,
+  // each further retry doubles it up to backoffCap, plus a bit of jitter.
+  backoffBase: const Duration(seconds: 1),
+  backoffCap: const Duration(seconds: 60),
+  backoffJitter: 0.1, // 0..1; fraction of the delay added at random
 );
 
 worker.handle('email:welcome', (task) async {
@@ -96,8 +102,9 @@ stateDiagram-v2
     pending --> processing: worker weighted BRPOP
     processing --> done: handler returns
     processing --> retry: handler throws
-    retry --> pending: re-enqueue (attempt++)
+    retry --> delayed: ZADD with backoff (attempt++)
     retry --> deadLetter: attempt reached maxRetries
+    delayed --> pending: due-mover promotes (score &le; now)
     done --> [*]
     deadLetter --> [*]
 ```
@@ -105,7 +112,19 @@ stateDiagram-v2
 - **Weighted queues.** With `{'critical': 6, 'default': 3, 'low': 1}` the worker
   polls `critical` about six times as often as `low`, so a flood of low-priority
   jobs can't starve important ones.
-- **Retries.** A handler that throws is retried up to the task's `maxRetries`.
+- **Retries with exponential backoff.** A handler that throws is retried up to
+  the task's `maxRetries`. Retries aren't immediate: the envelope goes into a
+  per-queue delayed sorted set (`<prefix>:<queue>:delayed`) scored with the time
+  it becomes due. The wait grows `min(cap, base * 2^(retry-1))` — the first
+  retry waits `backoffBase` (default 1s), each further one doubles up to
+  `backoffCap` (default 60s) — plus a little jitter so a burst of failures
+  doesn't re-fire in lockstep. All three are configurable on `Worker.connect`.
+- **Due-mover.** Each poll-loop pass, before it blocks on `BRPOP`, the worker
+  promotes any delayed tasks whose score has passed back onto their pending
+  list. The move runs inside a single Redis Lua script (`ZRANGEBYSCORE` +
+  `ZREM` + `LPUSH`), so it's atomic — a task can't be lost or duplicated, even
+  if several workers run the mover at once. Because the pop uses a short (1s)
+  timeout, a due task waits at most about a second past its scheduled time.
 - **Dead-letter list.** Once retries are exhausted, the envelope moves to a
   dead-letter list (`<prefix>:dead`) instead of looping forever, so you can
   inspect what failed.
@@ -114,11 +133,13 @@ stateDiagram-v2
 
 ## What this version keeps small (on purpose)
 
-- **Retries are immediate**, not backed off. A production setup would delay
-  re-enqueues with an exponential backoff via a sorted set; this keeps the core
-  retry path readable. (Planned for a later version.)
+- **No in-flight tracking.** A task is popped with `BRPOP`, so if a worker
+  crashes between the pop and finishing (or re-scheduling) the task, that task
+  is lost — there's no processing set or visibility timeout to recover it. The
+  delayed-retry mover itself is atomic and safe across workers; this caveat is
+  about the pop/handle step, and it's out of scope for this version.
 - **No scheduler / cron, no unique-task dedup, no web UI.** The goal is the
-  enqueue → process → retry → dead-letter core, done clearly.
+  enqueue → process → backoff-retry → dead-letter core, done clearly.
 
 ## Requirements
 
