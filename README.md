@@ -35,6 +35,9 @@ flowchart LR
     R -->|no| DL[["dead-letter list<br/>&lt;prefix&gt;:dead"]]
 ```
 
+
+> **Background:** I wrote up the design decisions behind this — porting the Asynq model to Dart, and what I left out — [on my blog](https://yusufihsangorgel.github.io/2026/07/08/asynq-for-dart.html).
+
 ## Why
 
 Anything slow or retryable — sending email, processing an upload, calling a
