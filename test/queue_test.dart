@@ -199,4 +199,105 @@ void main() {
     await client.close();
     await worker.close();
   });
+
+  test('a scheduled task waits in the delayed set, not pending', () async {
+    final client =
+        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+
+    // Far enough out that nothing could promote it during the test. No worker
+    // is needed: enqueue alone must place it correctly.
+    await client.enqueue(
+      Task('later', {}),
+      processIn: const Duration(seconds: 60),
+    );
+
+    final inspect = await _connect();
+    final delayed =
+        await inspect.send_object(['ZCARD', _delayedKey('default')]) as int;
+    expect(delayed, 1, reason: 'a scheduled task should sit in the delayed set');
+
+    final pending =
+        await inspect.send_object(['LLEN', _pendingKey('default')]) as int;
+    expect(pending, 0, reason: 'a scheduled task must not be pending yet');
+
+    // ...and its score must be the future due time.
+    final withScores = await inspect.send_object(
+      ['ZRANGE', _delayedKey('default'), '0', '-1', 'WITHSCORES'],
+    ) as List;
+    final score = int.parse(withScores[1] as String);
+    expect(
+      score,
+      greaterThan(DateTime.now().millisecondsSinceEpoch),
+      reason: 'the scheduled task should be due in the future',
+    );
+
+    await inspect.get_connection().close();
+    await client.close();
+  });
+
+  test('a scheduled task runs once its time comes, not before', () async {
+    final client =
+        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final worker = await Worker.connect(
+      host: _host,
+      port: _port,
+      prefix: _prefix,
+      queues: {'default': 1},
+    );
+
+    final ran = Completer<DateTime>();
+    worker.handle('later', (_) => ran.complete(DateTime.now()));
+    final loop = worker.run();
+
+    // The score is taken inside enqueue, after enqueuedAt, so the handler
+    // firing before enqueuedAt + delay would prove a promotion too early.
+    // enqueuedAt is floored to millis to match the score's precision; that
+    // keeps the bound airtight rather than off by a sub-millisecond sliver.
+    const delay = Duration(milliseconds: 300);
+    final enqueuedAt = DateTime.fromMillisecondsSinceEpoch(
+      DateTime.now().millisecondsSinceEpoch,
+    );
+    await client.enqueue(Task('later', {}), processIn: delay);
+
+    final ranAt = await ran.future.timeout(const Duration(seconds: 8));
+    expect(
+      ranAt.isBefore(enqueuedAt.add(delay)),
+      isFalse,
+      reason: 'the handler must not fire before the scheduled time',
+    );
+
+    worker.stop();
+    await loop.timeout(const Duration(seconds: 3));
+    await client.close();
+    await worker.close();
+  });
+
+  test('a processAt in the past runs promptly', () async {
+    final client =
+        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final worker = await Worker.connect(
+      host: _host,
+      port: _port,
+      prefix: _prefix,
+      queues: {'default': 1},
+    );
+
+    final ran = Completer<void>();
+    worker.handle('overdue', (_) => ran.complete());
+    final loop = worker.run();
+
+    await client.enqueue(
+      Task('overdue', {}),
+      processAt: DateTime.now().subtract(const Duration(hours: 1)),
+    );
+
+    // An already-due score is promoted on the next mover pass, so this should
+    // complete well inside the poll timeout.
+    await ran.future.timeout(const Duration(seconds: 8));
+
+    worker.stop();
+    await loop.timeout(const Duration(seconds: 3));
+    await client.close();
+    await worker.close();
+  });
 }

@@ -11,7 +11,8 @@ class Keys {
   /// worker BRPOP.
   String pending(String queue) => '$prefix:queue:$queue';
 
-  /// The sorted set holding envelopes waiting out a retry backoff for a queue.
+  /// The sorted set holding envelopes that aren't due yet for a queue, both
+  /// scheduled tasks and retries waiting out a backoff.
   /// The score is the unix-millis timestamp at which the task becomes due; the
   /// worker's due-mover promotes members whose score has passed back onto
   /// [pending]. Kept per-queue (rather than one global set) so the mover can

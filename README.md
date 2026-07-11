@@ -20,6 +20,7 @@ config:
 ---
 flowchart LR
     P["Producer<br/>client.enqueue(task, queue, maxRetries)"] -->|LPUSH| Q
+    P -->|"scheduled: ZADD with due time (processAt / processIn)"| Z
     subgraph Q["Redis lists — drained by weight"]
       direction TB
       C["critical &times;6"]
@@ -53,7 +54,7 @@ either succeeds or lands in the dead-letter list.
 
 ```yaml
 dependencies:
-  redis_task_queue: ^0.2.0
+  redis_task_queue: ^0.3.0
 ```
 
 ## Enqueue (from your request path)
@@ -69,6 +70,34 @@ await client.enqueue(
 ```
 
 `enqueue` is a single `LPUSH` — keep one client around and reuse it.
+
+## Schedule for later
+
+`enqueue` can also hold a task until a future time. Pass `processIn` (a delay
+from now) or `processAt` (an absolute time) — one or the other, not both:
+
+```dart
+// Run in roughly 15 minutes.
+await client.enqueue(
+  Task('email:reminder', {'user_id': '42'}),
+  processIn: const Duration(minutes: 15),
+);
+
+// Run at (or promptly after) a specific moment.
+await client.enqueue(
+  Task('report:daily', {}),
+  processAt: DateTime(2026, 7, 11, 6),
+);
+```
+
+There is no new machinery behind this: a scheduled task goes into the same
+per-queue delayed sorted set the retry backoff uses, scored with its due time,
+and the same due-mover promotes it. Two caveats follow from that. The task
+starts up to about a second past its due time, plus however long the task the
+worker is currently handling takes (the mover runs once per poll-loop pass),
+and it only starts while a worker polling that queue is running — with no
+worker up, it just waits in the set. A `processAt` in the past runs promptly
+on the next mover pass.
 
 ## Process (in a separate worker process)
 
@@ -102,6 +131,7 @@ config:
 ---
 stateDiagram-v2
     [*] --> pending: enqueue / LPUSH
+    [*] --> delayed: enqueue with processAt / processIn (ZADD)
     pending --> processing: worker weighted BRPOP
     processing --> done: handler returns
     processing --> retry: handler throws
@@ -141,8 +171,10 @@ stateDiagram-v2
   is lost — there's no processing set or visibility timeout to recover it. The
   delayed-retry mover itself is atomic and safe across workers; this caveat is
   about the pop/handle step, and it's out of scope for this version.
-- **No scheduler / cron, no unique-task dedup, no web UI.** The goal is the
-  enqueue → process → backoff-retry → dead-letter core, done clearly.
+- **No recurring schedules (cron), no unique-task dedup, no web UI.** One-shot
+  scheduling (`processAt` / `processIn`) shipped in 0.3.0; recurring schedules
+  are still out. The goal is the enqueue → process → backoff-retry →
+  dead-letter core, done clearly.
 
 ## Requirements
 

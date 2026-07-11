@@ -18,7 +18,9 @@ typedef TaskHandler = FutureOr<void> Function(Task task);
 /// it re-enqueues with an incremented attempt count, held back by an
 /// exponential backoff (see [backoffBase]/[backoffCap]) in a per-queue delayed
 /// sorted set; once attempts reach maxRetries the envelope goes to the
-/// dead-letter list instead of looping forever.
+/// dead-letter list instead of looping forever. The same delayed set also
+/// holds tasks scheduled for a future time; the poll loop's due-mover promotes
+/// both once due.
 class Worker {
   Worker._(
     this._command,
@@ -123,11 +125,12 @@ return moved
     _running = true;
     final keys = _weightedOrder().map(_keys.pending).toList();
     while (_running) {
-      // Promote due retries before blocking. Pairing this with the short (1s)
-      // BRPOP timeout below is what keeps the blocking pop from starving the
-      // mover: the pop parks for at most a second, then the loop cycles back
-      // here, so a due task waits no longer than roughly that timeout past its
-      // scheduled time. No separate timer/isolate needed.
+      // Promote due tasks (scheduled tasks and elapsed retry backoffs) before
+      // blocking. Pairing this with the short (1s) BRPOP timeout below is what
+      // keeps the blocking pop from starving the mover: the pop parks for at
+      // most a second, then the loop cycles back here, so a due task waits no
+      // longer than roughly that timeout past its scheduled time. No separate
+      // timer/isolate needed.
       await _promoteDue();
       // BRPOP blocks up to 1s across the weighted list of keys, returning from
       // whichever has an item first. The weighting comes from how many times a
@@ -140,8 +143,8 @@ return moved
     }
   }
 
-  /// Moves every task whose backoff has elapsed from each queue's delayed set
-  /// back onto its pending list, via the atomic [_promoteScript].
+  /// Moves every due task, scheduled or backed-off, from each queue's delayed
+  /// set back onto its pending list, via the atomic [_promoteScript].
   Future<void> _promoteDue() async {
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final queue in _queues.keys) {
