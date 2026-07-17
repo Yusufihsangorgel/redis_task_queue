@@ -1,3 +1,7 @@
+## 0.3.1
+
+- Docs: tightened the README wording and visuals.
+
 ## 0.2.0
 
 - Exponential backoff for retries. A failed task is no longer re-enqueued
