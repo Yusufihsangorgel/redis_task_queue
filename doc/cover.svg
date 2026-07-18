@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" font-family="Menlo, monospace">
+  <rect width="1200" height="400" fill="#0B1220"/>
+  <g opacity="0.9" font-size="12">
+    <text x="770" y="150" fill="#64748B">enqueue</text>
+    <path d="M770 160 l24 0 m0 0 l-7 -6 m7 6 l-7 6" stroke="#38BDF8" stroke-width="1.8"/>
+    <!-- queue slotları (ağırlıklı) -->
+    <rect x="812" y="150" width="34" height="26" rx="4" fill="#0E1A2E" stroke="#38BDF8"/>
+    <rect x="850" y="150" width="34" height="26" rx="4" fill="#0E1A2E" stroke="#38BDF8"/>
+    <rect x="888" y="150" width="34" height="26" rx="4" fill="#0E1A2E" stroke="#334155"/>
+    <rect x="926" y="150" width="34" height="26" rx="4" fill="#0E1A2E" stroke="#334155"/>
+    <path d="M972 163 l24 0 m0 0 l-7 -6 m7 6 l-7 6" stroke="#38BDF8" stroke-width="1.8"/>
+    <rect x="1008" y="146" width="70" height="36" rx="7" fill="#111C2E" stroke="#38BDF8"/><text x="1043" y="169" fill="#E2E8F0" text-anchor="middle">worker</text>
+    <!-- retry + dead letter -->
+    <path d="M1043 182 C 1043 220, 900 220, 900 190" stroke="#64748B" stroke-width="1.4" fill="none"/>
+    <text x="906" y="238" fill="#64748B">retry with backoff</text>
+    <text x="906" y="256" fill="#64748B">then dead-letter</text>
+  </g>
+  <text x="64" y="212" font-size="48" font-weight="bold" fill="#E2E8F0">redis_task_queue</text>
+  <text x="66" y="256" font-size="23" fill="#94A3B8">A server-side Dart queue: retries, dead letters, weights</text>
+</svg>
