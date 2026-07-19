@@ -13,28 +13,7 @@ with a deliberately small surface.
 
 The path a task takes, end to end:
 
-```mermaid
----
-config:
-  look: handDrawn
----
-flowchart LR
-    P["Producer<br/>client.enqueue(task, queue, maxRetries)"] -->|LPUSH| Q
-    P -->|"scheduled: ZADD with due time (processAt / processIn)"| Z
-    subgraph Q["Redis lists — drained by weight"]
-      direction TB
-      C["critical &times;6"]
-      D["default &times;3"]
-      L["low &times;1"]
-    end
-    Q -->|"weighted BRPOP (1s block)"| W["Worker poll loop"]
-    W --> H["Handler for task.type"]
-    H -->|returns normally| DONE(["done"])
-    H -->|throws / no handler| R{"attempts left?"}
-    R -->|"yes — ZADD with backoff, attempt++"| Z[["delayed set<br/>&lt;prefix&gt;:&lt;queue&gt;:delayed"]]
-    Z -->|"due-mover: score &le; now &rarr; LPUSH"| Q
-    R -->|no| DL[["dead-letter list<br/>&lt;prefix&gt;:dead"]]
-```
+![The path a task takes: a producer enqueues to weighted Redis lists, a worker drains them by weight and runs the handler, and on failure the task is backed off in a delayed set or sent to the dead-letter list](doc/task-flow.png)
 
 
 > **Background:** I wrote up the design decisions behind this — porting the Asynq model to Dart, and what I left out — [on my blog](https://yusufihsangorgel.github.io/2026/07/08/asynq-for-dart.html).
@@ -124,23 +103,7 @@ await worker.run();
 A task moves through a small set of states — it either lands on `done` or, once
 retries are exhausted, on the dead-letter list:
 
-```mermaid
----
-config:
-  look: handDrawn
----
-stateDiagram-v2
-    [*] --> pending: enqueue / LPUSH
-    [*] --> delayed: enqueue with processAt / processIn (ZADD)
-    pending --> processing: worker weighted BRPOP
-    processing --> done: handler returns
-    processing --> retry: handler throws
-    retry --> delayed: ZADD with backoff (attempt++)
-    retry --> deadLetter: attempt reached maxRetries
-    delayed --> pending: due-mover promotes (score &le; now)
-    done --> [*]
-    deadLetter --> [*]
-```
+![Task state machine: pending to processing to done, or on failure retry then delayed (backoff) or dead-letter once retries are exhausted](doc/task-states.png)
 
 - **Weighted queues.** With `{'critical': 6, 'default': 3, 'low': 1}` the worker
   polls `critical` about six times as often as `low`, so a flood of low-priority

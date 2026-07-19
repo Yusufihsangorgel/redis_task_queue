@@ -1,3 +1,9 @@
+## 0.4.1
+
+- Docs: replace the two README mermaid diagrams with rendered PNGs. pub.dev does
+  not render mermaid, so the diagrams showed as raw source there; they now display
+  as images on both pub.dev and GitHub.
+
 ## 0.4.0
 
 - Add observability hooks to `Worker.connect`. `onError` fires on every handler
