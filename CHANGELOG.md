@@ -1,3 +1,16 @@
+## 0.4.0
+
+- Add observability hooks to `Worker.connect`. `onError` fires on every handler
+  failure, with the 1-based attempt number and whether a retry follows;
+  `onDeadLetter` fires when a task is given up on after its retries. Both default
+  to null and are isolated, so a throwing callback cannot take the worker down.
+  Before this, a handler exception was swallowed silently, which is rarely what a
+  production queue wants.
+- Restore scheduled tasks (`enqueue` with `processAt` or `processIn`), which the
+  0.3.1 release removed by accident. 0.3.1 was published as a docs-only change
+  but also dropped the 0.3.0 scheduling feature; if you schedule tasks for a
+  future time, move to 0.4.0 (or pin 0.3.0) rather than 0.3.1.
+
 ## 0.3.0
 
 - Scheduled tasks. `enqueue` takes an optional `processAt` (an absolute time)
