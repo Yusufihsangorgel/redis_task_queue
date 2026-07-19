@@ -10,6 +10,36 @@ import 'task.dart';
 /// a retry (up to the envelope's maxRetries); returning normally marks it done.
 typedef TaskHandler = FutureOr<void> Function(Task task);
 
+/// Called each time a task handler throws, before the worker decides what to do
+/// next.
+///
+/// [attempt] is the 1-based number of the attempt that just failed (1 is the
+/// first run). [willRetry] is true if the worker will retry the task and false
+/// if retries are exhausted and it is going to the dead-letter list instead.
+/// This is the hook for logging failures or emitting metrics; without it a
+/// handler exception is invisible. An exception thrown by the callback itself is
+/// caught and ignored, so a faulty observer cannot take the worker down.
+typedef TaskErrorCallback = void Function(
+  Task task,
+  Object error,
+  StackTrace stackTrace, {
+  required int attempt,
+  required bool willRetry,
+});
+
+/// Called when a task has exhausted its retries and been moved to the
+/// dead-letter list.
+///
+/// This is the terminal-failure signal, the right place to alert a human or
+/// record that a job was given up on. [error] and [stackTrace] are from the
+/// task's last failed attempt. Like [TaskErrorCallback], a throwing callback is
+/// caught and ignored.
+typedef TaskDeadLetterCallback = void Function(
+  Task task,
+  Object error,
+  StackTrace stackTrace,
+);
+
 /// Consumes tasks from Redis and runs their handlers.
 ///
 /// The worker drains queues by weight: with `{'critical': 6, 'default': 3,
@@ -29,14 +59,24 @@ class Worker {
     required Duration backoffBase,
     required Duration backoffCap,
     required double backoffJitter,
+    TaskErrorCallback? onError,
+    TaskDeadLetterCallback? onDeadLetter,
   })  : _backoffBase = backoffBase,
         _backoffCap = backoffCap,
-        _backoffJitter = backoffJitter;
+        _backoffJitter = backoffJitter,
+        _onError = onError,
+        _onDeadLetter = onDeadLetter;
 
   final Command _command;
   final Keys _keys;
   final Map<String, int> _queues;
   final _handlers = <String, TaskHandler>{};
+
+  /// Notified on every handler failure; null if the caller wants no callback.
+  final TaskErrorCallback? _onError;
+
+  /// Notified when a task is dead-lettered; null if the caller wants no callback.
+  final TaskDeadLetterCallback? _onDeadLetter;
 
   /// The first retry waits [_backoffBase]; each further retry doubles the wait
   /// up to [_backoffCap]. [_backoffJitter] adds a random positive fraction of
@@ -81,6 +121,11 @@ return moved
   /// [backoffBase]/[backoffCap] bound the retry backoff: the first retry waits
   /// [backoffBase], each further retry doubles it up to [backoffCap].
   /// [backoffJitter] (0..1) is the fraction of that delay added at random.
+  ///
+  /// [onError] is called every time a handler throws, and [onDeadLetter] when a
+  /// task is finally given up on; both default to null (no callback). They are
+  /// the worker's observability seam: without them a handler exception is
+  /// swallowed silently, which is rarely what a production queue wants.
   static Future<Worker> connect({
     String host = 'localhost',
     int port = 6379,
@@ -89,6 +134,8 @@ return moved
     Duration backoffBase = const Duration(seconds: 1),
     Duration backoffCap = const Duration(seconds: 60),
     double backoffJitter = 0.1,
+    TaskErrorCallback? onError,
+    TaskDeadLetterCallback? onDeadLetter,
   }) async {
     final conn = RedisConnection();
     final command = await conn.connect(host, port);
@@ -99,6 +146,8 @@ return moved
       backoffBase: backoffBase,
       backoffCap: backoffCap,
       backoffJitter: backoffJitter,
+      onError: onError,
+      onDeadLetter: onDeadLetter,
     );
   }
 
@@ -167,14 +216,29 @@ return moved
         throw StateError('no handler for task type "${env.task.type}"');
       }
       await handler(env.task);
-    } catch (_) {
-      await _retryOrDeadLetter(env);
+    } catch (error, stackTrace) {
+      // `attempt` is not yet incremented here, so the try that just failed is
+      // `attempt + 1` (1-based) and it will be retried exactly when the same
+      // check in _retryOrDeadLetter would: while attempt is below maxRetries.
+      _notify(() => _onError?.call(
+            env.task,
+            error,
+            stackTrace,
+            attempt: env.attempt + 1,
+            willRetry: env.attempt < env.maxRetries,
+          ));
+      await _retryOrDeadLetter(env, error, stackTrace);
     }
   }
 
-  Future<void> _retryOrDeadLetter(Envelope env) async {
+  Future<void> _retryOrDeadLetter(
+    Envelope env,
+    Object error,
+    StackTrace stackTrace,
+  ) async {
     if (env.attempt >= env.maxRetries) {
       await _command.send_object(['LPUSH', _keys.deadLetter(), env.encode()]);
+      _notify(() => _onDeadLetter?.call(env.task, error, stackTrace));
       return;
     }
     env.attempt++;
@@ -207,6 +271,19 @@ return moved
       delayMs += (_random.nextDouble() * _backoffJitter * delayMs).round();
     }
     return Duration(milliseconds: delayMs);
+  }
+
+  /// Runs an observability callback, swallowing anything it throws.
+  ///
+  /// A bug in a caller's logging or metrics hook must never crash the worker or
+  /// abort a task's retry/dead-letter handling, so the callback is fully
+  /// isolated from the processing path.
+  void _notify(void Function() callback) {
+    try {
+      callback();
+    } catch (_) {
+      // Intentionally ignored; an observer's failure is not the worker's.
+    }
   }
 
   /// Stops the poll loop after the current iteration.

@@ -300,4 +300,82 @@ void main() {
     await client.close();
     await worker.close();
   });
+
+  test('onError fires on each failure and onDeadLetter fires terminally',
+      () async {
+    final client =
+        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final errors = <({int attempt, bool willRetry, Object error})>[];
+    final deadLettered = Completer<Task>();
+    // Small base keeps the single backed-off retry fast and deterministic.
+    final worker = await Worker.connect(
+      host: _host,
+      port: _port,
+      prefix: _prefix,
+      queues: {'default': 1},
+      backoffBase: const Duration(milliseconds: 30),
+      backoffJitter: 0,
+      onError: (task, error, stackTrace, {required attempt, required willRetry}) {
+        errors.add((attempt: attempt, willRetry: willRetry, error: error));
+      },
+      onDeadLetter: (task, error, stackTrace) {
+        if (!deadLettered.isCompleted) deadLettered.complete(task);
+      },
+    );
+
+    worker.handle('boom', (_) => throw StateError('always fails'));
+    final loop = worker.run();
+
+    // maxRetries: 1 means two executions: attempt 1 (will retry), then
+    // attempt 2 (retries exhausted -> dead-letter).
+    await client.enqueue(Task('boom', {}), maxRetries: 1);
+
+    final task = await deadLettered.future.timeout(const Duration(seconds: 10));
+    expect(task.type, 'boom');
+    // onError should have seen both attempts, with willRetry flipping to false
+    // on the last one, and the real exception passed through.
+    expect(errors.map((e) => e.attempt).toList(), [1, 2]);
+    expect(errors.map((e) => e.willRetry).toList(), [true, false]);
+    expect(errors.every((e) => e.error is StateError), isTrue);
+
+    worker.stop();
+    await loop.timeout(const Duration(seconds: 3));
+    await client.close();
+    await worker.close();
+  });
+
+  test('a throwing observer callback does not break the worker', () async {
+    final client =
+        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    // onError itself throws; the task must still reach the dead-letter list,
+    // proving the callback is isolated from the processing path.
+    final worker = await Worker.connect(
+      host: _host,
+      port: _port,
+      prefix: _prefix,
+      queues: {'default': 1},
+      onError: (_, __, ___, {required attempt, required willRetry}) =>
+          throw StateError('observer is buggy'),
+    );
+
+    worker.handle('boom', (_) => throw StateError('always fails'));
+    final loop = worker.run();
+
+    // maxRetries: 0 sends the task straight to dead-letter on the first failure.
+    await client.enqueue(Task('boom', {}), maxRetries: 0);
+
+    final inspect = await _connect();
+    final reached = await _pollUntil(
+      () async => (await inspect.send_object(['LLEN', _deadKey]) as int) == 1,
+      timeout: const Duration(seconds: 10),
+    );
+    expect(reached, isTrue,
+        reason: 'task must dead-letter even though onError threw');
+
+    worker.stop();
+    await loop.timeout(const Duration(seconds: 3));
+    await inspect.get_connection().close();
+    await client.close();
+    await worker.close();
+  });
 }
