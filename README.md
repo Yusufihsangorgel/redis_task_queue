@@ -33,9 +33,8 @@ either succeeds or lands in the dead-letter list.
 
 ## Install
 
-```yaml
-dependencies:
-  redis_task_queue: ^0.3.0
+```sh
+dart pub add redis_task_queue
 ```
 
 ## Enqueue (from your request path)
