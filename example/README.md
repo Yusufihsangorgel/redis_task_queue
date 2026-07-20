@@ -134,14 +134,20 @@ list for you, and a queue nobody reads is an outage nobody hears about.
 
 ```dart
 final worker = await Worker.connect(
-  onError: (task, error, stack, {required attempt, required willRetry}) {
-    log.warning('${task.type} failed on attempt $attempt, retry: $willRetry');
+  onError: (task, context, error, stack) {
+    log.warning('${task.type} ${context.id} failed on attempt '
+        '${context.attempt} of ${context.maxAttempts}');
   },
-  onDeadLetter: (task, error, stack) {
-    alert('gave up on ${task.type}', error);
+  onDeadLetter: (task, context, error, stack) {
+    alert('gave up on ${task.type}, task ${context.id}', error);
   },
 );
 ```
+
+Both observers get the same `TaskContext` the handler got, so `context.id` is
+the id `enqueue` returned. That is what makes the alert actionable: without it a
+page at 3am says a task type failed, and the job it is talking about cannot be
+found.
 
 `TaskContext.isLastAttempt` is the other half: it is true on exactly the run
 whose failure gives up, which is the last chance to record a partial result or

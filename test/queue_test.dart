@@ -310,8 +310,9 @@ void main() {
       () async {
     final client =
         await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
-    final errors = <({int attempt, bool willRetry, Object error})>[];
+    final errors = <({int attempt, bool willRetry, Object error, String id})>[];
     final deadLettered = Completer<Task>();
+    String? deadLetteredId;
     // Small base keeps the single backed-off retry fast and deterministic.
     final worker = await Worker.connect(
       host: _host,
@@ -320,10 +321,16 @@ void main() {
       queues: {'default': 1},
       backoffBase: const Duration(milliseconds: 30),
       backoffJitter: 0,
-      onError: (task, error, stackTrace, {required attempt, required willRetry}) {
-        errors.add((attempt: attempt, willRetry: willRetry, error: error));
+      onError: (task, context, error, stackTrace) {
+        errors.add((
+          attempt: context.attempt,
+          willRetry: !context.isLastAttempt,
+          error: error,
+          id: context.id,
+        ));
       },
-      onDeadLetter: (task, error, stackTrace) {
+      onDeadLetter: (task, context, error, stackTrace) {
+        deadLetteredId = context.id;
         if (!deadLettered.isCompleted) deadLettered.complete(task);
       },
     );
@@ -333,7 +340,7 @@ void main() {
 
     // maxRetries: 1 means two executions: attempt 1 (will retry), then
     // attempt 2 (retries exhausted -> dead-letter).
-    await client.enqueue(Task('boom', {}), maxRetries: 1);
+    final id = await client.enqueue(Task('boom', {}), maxRetries: 1);
 
     final task = await deadLettered.future.timeout(const Duration(seconds: 10));
     expect(task.type, 'boom');
@@ -342,6 +349,11 @@ void main() {
     expect(errors.map((e) => e.attempt).toList(), [1, 2]);
     expect(errors.map((e) => e.willRetry).toList(), [true, false]);
     expect(errors.every((e) => e.error is StateError), isTrue);
+    // The point of handing the observers a context: a failure log and a
+    // dead-letter alert can name the job, not just its type. Without the id
+    // there is no way to get from either back to the task that produced it.
+    expect(errors.map((e) => e.id).toSet(), {id});
+    expect(deadLetteredId, id);
 
     worker.stop();
     await loop.timeout(const Duration(seconds: 3));
@@ -409,8 +421,7 @@ void main() {
       port: _port,
       prefix: _prefix,
       queues: {'default': 1},
-      onError: (_, __, ___, {required attempt, required willRetry}) =>
-          throw StateError('observer is buggy'),
+      onError: (_, __, ___, ____) => throw StateError('observer is buggy'),
     );
 
     worker.handle('boom', (_, __) => throw StateError('always fails'));

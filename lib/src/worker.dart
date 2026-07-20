@@ -18,29 +18,35 @@ typedef TaskHandler = FutureOr<void> Function(Task task, TaskContext context);
 /// Called each time a task handler throws, before the worker decides what to do
 /// next.
 ///
-/// [attempt] is the 1-based number of the attempt that just failed (1 is the
-/// first run). [willRetry] is true if the worker will retry the task and false
-/// if retries are exhausted and it is going to the dead-letter list instead.
+/// [context] describes the run that failed, the same value the handler was
+/// given. `context.id` is what makes the callback useful in production: it is
+/// the id [QueueClient.enqueue] returned, so a failure log or a metric can be
+/// correlated back to a specific job rather than only to a task type.
+/// `context.attempt` is the 1-based attempt that just failed, and
+/// `context.isLastAttempt` is true when this failure sends the task to the
+/// dead-letter list rather than scheduling another retry.
+///
 /// This is the hook for logging failures or emitting metrics; without it a
 /// handler exception is invisible. An exception thrown by the callback itself is
 /// caught and ignored, so a faulty observer cannot take the worker down.
 typedef TaskErrorCallback = void Function(
   Task task,
+  TaskContext context,
   Object error,
-  StackTrace stackTrace, {
-  required int attempt,
-  required bool willRetry,
-});
+  StackTrace stackTrace,
+);
 
 /// Called when a task has exhausted its retries and been moved to the
 /// dead-letter list.
 ///
 /// This is the terminal-failure signal, the right place to alert a human or
-/// record that a job was given up on. [error] and [stackTrace] are from the
-/// task's last failed attempt. Like [TaskErrorCallback], a throwing callback is
-/// caught and ignored.
+/// record that a job was given up on. [context] carries the task's id, so the
+/// alert can name the job somebody will have to go and find; [error] and
+/// [stackTrace] are from the task's last failed attempt. Like
+/// [TaskErrorCallback], a throwing callback is caught and ignored.
 typedef TaskDeadLetterCallback = void Function(
   Task task,
+  TaskContext context,
   Object error,
   StackTrace stackTrace,
 );
@@ -347,36 +353,21 @@ return 0
   Future<void> _process(String raw) async {
     final env = Envelope.decode(raw);
     final handler = _handlers[env.task.type];
+    // `attempt` counts from 1 while the envelope's counts retries from 0, so
+    // the run in progress is `attempt + 1`, and the total is the first run plus
+    // its retries. Both match the arithmetic _retryOrDeadLetter uses to decide
+    // when to give up, so isLastAttempt is true on exactly the run whose
+    // failure dead-letters the task. The handler and the observers are given
+    // the same value, so a log line and the task it describes agree.
+    final context = _contextFor(env);
     try {
       if (handler == null) {
         throw StateError('no handler for task type "${env.task.type}"');
       }
-      // `attempt` counts from 1 while the envelope's counts retries from 0, so
-      // the run in progress is `attempt + 1`, and the total is the first run
-      // plus its retries. Both match the arithmetic _retryOrDeadLetter uses to
-      // decide when to give up, so isLastAttempt is true on exactly the run
-      // whose failure dead-letters the task.
-      await handler(
-        env.task,
-        TaskContext(
-          id: env.id,
-          queue: env.queue,
-          attempt: env.attempt + 1,
-          maxAttempts: env.maxRetries + 1,
-        ),
-      );
+      await handler(env.task, context);
     } catch (error, stackTrace) {
-      // `attempt` is not yet incremented here, so the try that just failed is
-      // `attempt + 1` (1-based) and it will be retried exactly when the same
-      // check in _retryOrDeadLetter would: while attempt is below maxRetries.
-      _notify(() => _onError?.call(
-            env.task,
-            error,
-            stackTrace,
-            attempt: env.attempt + 1,
-            willRetry: env.attempt < env.maxRetries,
-          ));
-      await _retryOrDeadLetter(raw, env, error, stackTrace);
+      _notify(() => _onError?.call(env.task, context, error, stackTrace));
+      await _retryOrDeadLetter(raw, env, context, error, stackTrace);
       return;
     }
     // Done: drop the envelope from the in-flight list. If the worker dies before
@@ -387,9 +378,18 @@ return 0
     );
   }
 
+  /// The run in progress, as the handler and the observers both see it.
+  TaskContext _contextFor(Envelope env) => TaskContext(
+        id: env.id,
+        queue: env.queue,
+        attempt: env.attempt + 1,
+        maxAttempts: env.maxRetries + 1,
+      );
+
   Future<void> _retryOrDeadLetter(
     String raw,
     Envelope env,
+    TaskContext context,
     Object error,
     StackTrace stackTrace,
   ) async {
@@ -400,7 +400,7 @@ return 0
       await _command.send_object(
         ['EVAL', _deadScript, '2', inFlight, _keys.deadLetter(), raw],
       );
-      _notify(() => _onDeadLetter?.call(env.task, error, stackTrace));
+      _notify(() => _onDeadLetter?.call(env.task, context, error, stackTrace));
       return;
     }
     env.attempt++;

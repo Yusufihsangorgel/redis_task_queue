@@ -1,3 +1,18 @@
+## 0.7.0
+
+- **Breaking:** `onError` and `onDeadLetter` now receive the run's
+  `TaskContext` as their second argument, and the `attempt`/`willRetry` named
+  parameters are gone: `context.attempt` and `!context.isLastAttempt` carry the
+  same information, so there is one shape to learn instead of two.
+  The reason is `context.id`. The observers had the task type and the error but
+  no id, so a failure log or a dead-letter alert could name a *kind* of job and
+  never the job itself. That is the first thing anyone wants during triage, and
+  it was the one place 0.6.0's `TaskContext` had not reached: the handler got it,
+  the observability seam did not.
+  Migration: `(task, error, stack, {attempt, willRetry})` becomes
+  `(task, context, error, stack)`, reading `context.attempt` and
+  `context.isLastAttempt`.
+
 ## 0.6.1
 
 - Install instructions now say `pub add` instead of pinning a version. The
