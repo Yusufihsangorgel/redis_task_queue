@@ -8,9 +8,15 @@ Future<void> main(List<String> args) async {
 
   if (mode == 'worker') {
     final worker = await Worker.connect();
-    worker.handle('email:welcome', (task) async {
-      // Real work goes here. Throw to trigger a retry.
-      print('sending welcome email for user ${task.payload['user_id']}');
+    worker.handle('email:welcome', (task, context) async {
+      // Real work goes here. Throw to trigger a retry; return to mark it done.
+      //
+      // `context.id` is the same on every attempt, so it is what to record
+      // against the effect to keep a repeat from sending the mail twice. See
+      // at_least_once.dart for why a repeat is not hypothetical.
+      print('attempt ${context.attempt} of ${context.maxAttempts}: '
+          'sending welcome email for user ${task.payload['user_id']} '
+          '(task ${context.id})');
     });
     print('worker running (Ctrl-C to stop)');
     await worker.run();

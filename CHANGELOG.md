@@ -1,3 +1,28 @@
+## 0.6.0
+
+- **Breaking:** a handler now takes the run's context as a second argument,
+  `(Task task, TaskContext context)`. Existing handlers migrate by adding the
+  parameter: `(task) async { ... }` becomes `(task, _) async { ... }`.
+- Handlers can see which run they are in. `TaskContext` carries the task's `id`,
+  the `queue` it came from, the 1-based `attempt`, `maxAttempts` (the first run
+  plus its retries) and `isLastAttempt`, which is true on exactly the run whose
+  failure dead-letters the task.
+  The `id` is the point. Delivery is at-least-once, so the package has always
+  asked handlers to be idempotent, but until now it gave them nothing stable to
+  deduplicate on: the id lived in the envelope and never reached the handler,
+  which left callers inventing their own key inside the payload. It is assigned
+  at enqueue and is unchanged across retries and crash recoveries, so it is the
+  value to record with the effect. `attempt` and `isLastAttempt` cover the other
+  half, taking a slower or safer path on a late try and getting one last chance
+  to record something before the task is given up on.
+- Examples now demonstrate the delivery guarantees instead of describing them.
+  `example/crash_recovery.dart` kills a worker mid-task in a child process and
+  shows the task completing after recovery. `example/at_least_once.dart` stages
+  the same crash twice, with a careless handler and with one keyed off
+  `context.id`, and counts the effect: applied twice, then once. There is also
+  an `example/README.md` covering the worker-id contract, the idempotency
+  pattern, watching the dead-letter list, and where this queue does not fit.
+
 ## 0.5.0
 
 - Crash-safe at-least-once delivery. The worker now claims a task by atomically

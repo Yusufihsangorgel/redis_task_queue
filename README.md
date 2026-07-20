@@ -92,8 +92,13 @@ final worker = await Worker.connect(
   backoffJitter: 0.1, // 0..1; fraction of the delay added at random
 );
 
-worker.handle('email:welcome', (task) async {
+worker.handle('email:welcome', (task, context) async {
   // Real work. Throwing triggers a retry; returning marks the task done.
+  //
+  // `context` describes this run: `context.id` is the task's id, the same on
+  // every attempt and after a crash recovery, so it is what to record against
+  // the effect. `context.attempt`, `context.maxAttempts` and
+  // `context.isLastAttempt` say where in the retry budget this run sits.
   await sendWelcomeEmail(task.payload['user_id'] as String);
 });
 
@@ -129,7 +134,11 @@ retries are exhausted, on the dead-letter list:
   `run` the worker requeues everything left on its own list and runs it again.
   Nothing is silently lost. The trade is that a task can run more than once (it
   crashed after finishing but before the removal), so **handlers must be
-  idempotent** — the same contract as Sidekiq or Asynq.
+  idempotent** — the same contract as Sidekiq or Asynq. The handler is given
+  what it needs to hold up its end: `context.id` is assigned at enqueue and is
+  identical on every attempt and every recovery, so it is the key to write
+  against the effect. `example/at_least_once.dart` stages the crash and counts
+  the result, with and without that defence.
 - **Due-mover.** Each poll-loop pass, before it claims the next task, the worker
   promotes any delayed tasks whose score has passed back onto their pending
   list. The move runs inside a single Redis Lua script (`ZRANGEBYSCORE` +

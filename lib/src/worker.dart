@@ -9,7 +9,11 @@ import 'task.dart';
 
 /// A handler processes one task type. Throwing signals failure, which triggers
 /// a retry (up to the envelope's maxRetries); returning normally marks it done.
-typedef TaskHandler = FutureOr<void> Function(Task task);
+///
+/// [context] carries what the worker knows about this particular run: the
+/// task's stable id to deduplicate on, which attempt this is, and whether it is
+/// the last one. Handlers that don't need any of it can ignore the parameter.
+typedef TaskHandler = FutureOr<void> Function(Task task, TaskContext context);
 
 /// Called each time a task handler throws, before the worker decides what to do
 /// next.
@@ -347,7 +351,20 @@ return 0
       if (handler == null) {
         throw StateError('no handler for task type "${env.task.type}"');
       }
-      await handler(env.task);
+      // `attempt` counts from 1 while the envelope's counts retries from 0, so
+      // the run in progress is `attempt + 1`, and the total is the first run
+      // plus its retries. Both match the arithmetic _retryOrDeadLetter uses to
+      // decide when to give up, so isLastAttempt is true on exactly the run
+      // whose failure dead-letters the task.
+      await handler(
+        env.task,
+        TaskContext(
+          id: env.id,
+          queue: env.queue,
+          attempt: env.attempt + 1,
+          maxAttempts: env.maxRetries + 1,
+        ),
+      );
     } catch (error, stackTrace) {
       // `attempt` is not yet incremented here, so the try that just failed is
       // `attempt + 1` (1-based) and it will be retried exactly when the same

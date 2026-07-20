@@ -61,7 +61,7 @@ void main() {
     );
 
     final ran = Completer<String>();
-    worker.handle('greet', (task) => ran.complete(task.payload['name'] as String));
+    worker.handle('greet', (task, _) => ran.complete(task.payload['name'] as String));
     final loop = worker.run();
 
     await client.enqueue(Task('greet', {'name': 'jane'}));
@@ -88,7 +88,7 @@ void main() {
       backoffJitter: 0,
     );
 
-    worker.handle('boom', (_) => throw StateError('always fails'));
+    worker.handle('boom', (_, __) => throw StateError('always fails'));
     final loop = worker.run();
 
     await client.enqueue(Task('boom', {}), maxRetries: 5);
@@ -141,7 +141,7 @@ void main() {
 
     var attempts = 0;
     final succeeded = Completer<void>();
-    worker.handle('flaky', (_) {
+    worker.handle('flaky', (_, __) {
       attempts++;
       if (attempts == 1) throw StateError('fails once');
       succeeded.complete(); // second run succeeds
@@ -176,7 +176,7 @@ void main() {
     );
 
     var attempts = 0;
-    worker.handle('boom', (_) {
+    worker.handle('boom', (_, __) {
       attempts++;
       throw StateError('always fails');
     });
@@ -251,7 +251,7 @@ void main() {
     );
 
     final ran = Completer<DateTime>();
-    worker.handle('later', (_) => ran.complete(DateTime.now()));
+    worker.handle('later', (_, __) => ran.complete(DateTime.now()));
     final loop = worker.run();
 
     // The score is taken inside enqueue, after enqueuedAt, so the handler
@@ -288,7 +288,7 @@ void main() {
     );
 
     final ran = Completer<void>();
-    worker.handle('overdue', (_) => ran.complete());
+    worker.handle('overdue', (_, __) => ran.complete());
     final loop = worker.run();
 
     await client.enqueue(
@@ -328,7 +328,7 @@ void main() {
       },
     );
 
-    worker.handle('boom', (_) => throw StateError('always fails'));
+    worker.handle('boom', (_, __) => throw StateError('always fails'));
     final loop = worker.run();
 
     // maxRetries: 1 means two executions: attempt 1 (will retry), then
@@ -366,7 +366,7 @@ void main() {
 
     final processed = <String>[];
     final done = Completer<void>();
-    void record(Task task) {
+    void record(Task task, TaskContext _) {
       processed.add(task.payload['q'] as String);
       if (processed.length == 6 && !done.isCompleted) done.complete();
     }
@@ -413,7 +413,7 @@ void main() {
           throw StateError('observer is buggy'),
     );
 
-    worker.handle('boom', (_) => throw StateError('always fails'));
+    worker.handle('boom', (_, __) => throw StateError('always fails'));
     final loop = worker.run();
 
     // maxRetries: 0 sends the task straight to dead-letter on the first failure.

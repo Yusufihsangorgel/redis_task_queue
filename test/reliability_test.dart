@@ -62,7 +62,7 @@ void main() {
 
     final started = Completer<void>();
     final release = Completer<void>();
-    worker.handle('slow', (_) async {
+    worker.handle('slow', (_, __) async {
       started.complete();
       await release.future; // Block, standing in for work in progress.
     });
@@ -128,7 +128,7 @@ void main() {
       workerId: _workerId,
     );
     final ran = Completer<int>();
-    worker.handle('resume', (task) => ran.complete(task.payload['n'] as int));
+    worker.handle('resume', (task, _) => ran.complete(task.payload['n'] as int));
     final loop = worker.run();
 
     expect(await ran.future.timeout(const Duration(seconds: 5)), 7,
@@ -169,7 +169,7 @@ void main() {
       queues: {'default': 1},
       workerId: _workerId,
     );
-    worker.handle('x', (_) {});
+    worker.handle('x', (_, __) {});
     final loop = worker.run();
 
     // Give recovery + a poll cycle time to run, then confirm the peer's task is
