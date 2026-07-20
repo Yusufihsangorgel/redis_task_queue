@@ -1,3 +1,15 @@
+## 0.9.0
+
+- `QueueClient.stats()` reports queue depth: pending and delayed counts per
+  queue, plus the total in-flight and dead-letter counts, as a `QueueStats`.
+  It reads counters rather than tasks, so it is cheap enough to poll for a
+  dashboard or a backlog alert, and it discovers the active queues with `SCAN`
+  rather than `KEYS`, so it does not block Redis. Pass `queues: [...]` to count
+  a fixed set instead, which reports an empty queue as zero rather than omitting
+  it. This is the "is the system keeping up" question the queue could not answer
+  before: a growing pending count means the workers are behind, a growing
+  dead-letter count means something is failing for good.
+
 ## 0.8.0
 
 - The dead-letter list is now inspectable and manageable, which the README has

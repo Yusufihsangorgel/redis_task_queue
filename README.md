@@ -173,6 +173,22 @@ A replay removes the entry and re-enqueues the task in one atomic step, so it
 can't be dropped from the dead-letter list without landing back on its queue,
 or enqueued twice if two callers replay it at once.
 
+## Seeing how deep the queue is
+
+```dart
+final stats = await client.stats();
+print('pending ${stats.totalPending}, in flight ${stats.inFlight}, '
+    'delayed ${stats.totalDelayed}, dead ${stats.deadLetter}');
+print(stats.pending); // {critical: 0, default: 128, low: 12}
+```
+
+`stats()` reads counters, not tasks, so it is cheap enough to poll for a
+dashboard or a backlog alert: a pending count that only climbs means the workers
+are behind, and a dead-letter count that climbs means something is failing for
+good. It discovers the active queues with a `SCAN` (never `KEYS`, so it does not
+block Redis). Pass `queues: [...]` to count exactly those instead, which also
+reports a queue that has no keys yet as zero rather than omitting it.
+
 ## Recovery and worker ids
 
 In-flight recovery keys off `workerId` (default: the host name). A restarted

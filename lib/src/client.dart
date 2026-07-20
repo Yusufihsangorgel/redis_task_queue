@@ -4,6 +4,7 @@ import 'package:redis/redis.dart';
 
 import 'keys.dart';
 import 'schedule.dart';
+import 'stats.dart';
 import 'task.dart';
 
 /// Enqueues tasks onto Redis. Safe to keep one client for the lifetime of your
@@ -153,6 +154,79 @@ return 0
         await _command.send_object(['LLEN', _keys.deadLetter()]) as int;
     await _command.send_object(['DEL', _keys.deadLetter()]);
     return count;
+  }
+
+  /// A snapshot of queue depth: pending and delayed per queue, plus the total
+  /// in-flight and dead-letter counts.
+  ///
+  /// Pass [queues] to count exactly those, which is one round trip per queue
+  /// and no key scanning; a named queue with no keys reports zero rather than
+  /// being left out, which is what a fixed dashboard wants. Omit it to discover
+  /// the queues that currently have keys, with a `SCAN` (not `KEYS`, so it does
+  /// not block Redis). Discovery only sees a queue that has a pending or delayed
+  /// key right now: Redis deletes an empty list, so a queue whose only task is
+  /// in flight has nothing to discover. Name it explicitly to always see it.
+  /// Discovery also assumes a queue name does not itself end in `:delayed`.
+  ///
+  /// This reads counters, not the tasks, so it is cheap enough to poll for a
+  /// dashboard or an alert on a growing backlog.
+  Future<QueueStats> stats({Iterable<String>? queues}) async {
+    final names = queues != null
+        ? queues.toSet()
+        : await _discoverQueues();
+
+    final pending = <String, int>{};
+    final delayed = <String, int>{};
+    for (final queue in names) {
+      pending[queue] =
+          await _command.send_object(['LLEN', _keys.pending(queue)]) as int;
+      delayed[queue] =
+          await _command.send_object(['ZCARD', _keys.delayed(queue)]) as int;
+    }
+
+    final deadLetter =
+        await _command.send_object(['LLEN', _keys.deadLetter()]) as int;
+
+    var inFlight = 0;
+    for (final key in await _scanKeys('${_keys.prefix}:inflight:*')) {
+      inFlight += await _command.send_object(['LLEN', key]) as int;
+    }
+
+    return QueueStats(
+      pending: pending,
+      delayed: delayed,
+      deadLetter: deadLetter,
+      inFlight: inFlight,
+    );
+  }
+
+  /// The queue names that currently have a pending list or a delayed set.
+  Future<Set<String>> _discoverQueues() async {
+    final queuePrefix = '${_keys.prefix}:queue:';
+    const delayedSuffix = ':delayed';
+    final names = <String>{};
+    for (final key in await _scanKeys('$queuePrefix*')) {
+      final rest = key.substring(queuePrefix.length);
+      names.add(rest.endsWith(delayedSuffix)
+          ? rest.substring(0, rest.length - delayedSuffix.length)
+          : rest);
+    }
+    return names;
+  }
+
+  /// Cursor-based `SCAN` for every key matching [pattern]. Uses `SCAN` rather
+  /// than `KEYS` so a large keyspace does not block Redis.
+  Future<List<String>> _scanKeys(String pattern) async {
+    final keys = <String>[];
+    var cursor = '0';
+    do {
+      final result = await _command.send_object(
+        ['SCAN', cursor, 'MATCH', pattern, 'COUNT', '100'],
+      ) as List;
+      cursor = result[0] as String;
+      keys.addAll((result[1] as List).cast<String>());
+    } while (cursor != '0');
+    return keys;
   }
 
   Future<void> close() => _command.get_connection().close();
