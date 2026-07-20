@@ -1,3 +1,15 @@
+## 0.10.0
+
+- `stop()` is now awaitable: it returns a future that completes once the worker
+  has drained, the task in progress finished and the loop exited. `await
+  worker.stop()` is the graceful-shutdown path for a SIGTERM or a rolling
+  deploy. Existing `worker.stop();` statements are unaffected; the returned
+  future is simply ignored.
+  To be clear about what this does and does not change: a task already in flight
+  was never cut off, since the run loop awaits the handler before checking
+  whether it should stop. What was missing was a way to *wait* for that drain
+  without separately holding the future from `run()`. This adds it.
+
 ## 0.9.0
 
 - `QueueClient.stats()` reports queue depth: pending and delayed counts per

@@ -104,6 +104,15 @@ worker.handle('email:welcome', (task, context) async {
 await worker.run();
 ```
 
+To shut down gracefully, on a SIGTERM or a rolling deploy, await `stop()`: it
+stops claiming new tasks and returns once the task in progress has finished, so
+work is drained rather than abandoned to recovery on the next start.
+
+```dart
+await worker.stop();
+await worker.close();
+```
+
 ## How it behaves
 
 A task moves through a small set of states — it either lands on `done` or, once

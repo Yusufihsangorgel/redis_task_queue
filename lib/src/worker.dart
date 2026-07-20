@@ -105,6 +105,10 @@ class Worker {
 
   var _running = false;
 
+  /// Completes when the run loop exits, so [stop] can hand back a future that
+  /// resolves once the worker has drained. Null before the first [run].
+  Completer<void>? _drained;
+
   /// How many due tasks the mover promotes per queue per loop pass. Bounded so
   /// a huge backlog coming due at once can't block the loop in one giant move;
   /// the remainder is picked up on the next pass.
@@ -234,25 +238,35 @@ return 0
   /// any delayed tasks that have come due and claims the next one to run.
   Future<void> run() async {
     _running = true;
-    await _recoverOrphans();
-    // The weighted order (each queue repeated by its weight) and the single
-    // highest-weight queue, computed once. _claim rotates through the weighted
-    // order so the queue that gets first look is drawn in proportion to weight.
-    final weighted = _weightedOrder();
-    final topQueue = weighted.isEmpty
-        ? ''
-        : _queues.entries.reduce((a, b) => b.value > a.value ? b : a).key;
-    while (_running) {
-      // Promote due tasks (scheduled tasks and elapsed retry backoffs) before
-      // claiming. Pairing this with the short (1s) blocking claim below keeps
-      // the claim from starving the mover: it parks for at most a second, then
-      // the loop cycles back here, so a due task waits no longer than roughly
-      // that timeout past its scheduled time. No separate timer/isolate needed.
-      await _promoteDue();
-      final claimed = await _claim(weighted, topQueue);
-      // Nothing was ready within the blocking window; loop and promote again.
-      if (claimed == null) continue;
-      await _process(claimed);
+    _drained = Completer<void>();
+    try {
+      await _recoverOrphans();
+      // The weighted order (each queue repeated by its weight) and the single
+      // highest-weight queue, computed once. _claim rotates through the
+      // weighted order so the queue that gets first look is drawn in proportion
+      // to weight.
+      final weighted = _weightedOrder();
+      final topQueue = weighted.isEmpty
+          ? ''
+          : _queues.entries.reduce((a, b) => b.value > a.value ? b : a).key;
+      while (_running) {
+        // Promote due tasks (scheduled tasks and elapsed retry backoffs) before
+        // claiming. Pairing this with the short (1s) blocking claim below keeps
+        // the claim from starving the mover: it parks for at most a second,
+        // then the loop cycles back here, so a due task waits no longer than
+        // roughly that timeout past its scheduled time. No separate
+        // timer/isolate needed.
+        await _promoteDue();
+        final claimed = await _claim(weighted, topQueue);
+        // Nothing was ready within the blocking window; loop and promote again.
+        if (claimed == null) continue;
+        // A task claimed just before stop() still runs to completion: it has
+        // already been moved onto the in-flight list, so finishing it is the
+        // clean end, not leaving it for recovery.
+        await _process(claimed);
+      }
+    } finally {
+      _drained?.complete();
     }
   }
 
@@ -460,8 +474,28 @@ return 0
     }
   }
 
-  /// Stops the poll loop after the current iteration.
-  void stop() => _running = false;
+  /// Stops claiming new tasks and returns a future that completes once the
+  /// worker has drained: the task it was running, if any, has finished and the
+  /// run loop has exited.
+  ///
+  /// This is the graceful-shutdown path. Awaiting it lets a task in progress
+  /// complete rather than being abandoned to recovery, which is what you want
+  /// on a rolling deploy or a SIGTERM:
+  ///
+  /// ```dart
+  /// await worker.stop();
+  /// await worker.close();
+  /// ```
+  ///
+  /// The wait is bounded by the current task plus up to about a second, the
+  /// blocking window of an in-progress claim. Calling it before [run], or
+  /// after the loop has already exited, returns an already-completed future.
+  Future<void> stop() {
+    _running = false;
+    final drained = _drained;
+    if (drained == null || drained.isCompleted) return Future<void>.value();
+    return drained.future;
+  }
 
   Future<void> close() => _command.get_connection().close();
 }
