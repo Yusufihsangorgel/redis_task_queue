@@ -4,7 +4,9 @@
 
 A small Redis-backed task queue for server-side Dart. Enqueue work from your
 request path and process it in a separate worker — with retries, a dead-letter
-list, and weighted queues so one noisy queue can't starve the others.
+list, weighted queues so one noisy queue can't starve the others, and
+crash-safe at-least-once delivery: a task a worker was running when it died is
+recovered on restart, not lost.
 
 If you've used [Asynq](https://github.com/hibiken/asynq) in Go or Sidekiq in
 Ruby, the model will feel familiar. Dart server frameworks (Serverpod,
@@ -13,7 +15,7 @@ with a deliberately small surface.
 
 The path a task takes, end to end:
 
-![The path a task takes: a producer enqueues to weighted Redis lists, a worker drains them by weight and runs the handler, and on failure the task is backed off in a delayed set or sent to the dead-letter list](doc/task-flow.png)
+![The path a task takes: a producer enqueues to weighted Redis lists, a worker claims each task onto an in-flight list with LMOVE and runs the handler, tasks left in flight by a crashed worker are requeued on restart, and on failure the task is backed off in a delayed set or sent to the dead-letter list](doc/task-flow.png)
 
 
 > **Background:** I wrote up the design decisions behind this — porting the Asynq model to Dart, and what I left out — [on my blog](https://yusufihsangorgel.github.io/2026/07/08/asynq-for-dart.html).
@@ -103,11 +105,14 @@ await worker.run();
 A task moves through a small set of states — it either lands on `done` or, once
 retries are exhausted, on the dead-letter list:
 
-![Task state machine: pending to processing to done, or on failure retry then delayed (backoff) or dead-letter once retries are exhausted](doc/task-states.png)
+![Task state machine: pending to processing to done; a worker that dies while processing returns the task to pending on restart; on failure it goes to retry then a delayed backoff or, once retries are exhausted, the dead-letter list](doc/task-states.png)
 
 - **Weighted queues.** With `{'critical': 6, 'default': 3, 'low': 1}` the worker
-  polls `critical` about six times as often as `low`, so a flood of low-priority
-  jobs can't starve important ones.
+  gives `critical` first look six times as often as `low` (a rotating cursor
+  over the weighted order), so under load the queues are served roughly 6:3:1.
+  A flood of low-priority jobs can't starve important ones — and, unlike strict
+  priority, a flood of critical jobs can't fully starve `low` either, since it
+  still leads one sweep in every ten.
 - **Retries with exponential backoff.** A handler that throws is retried up to
   the task's `maxRetries`. Retries aren't immediate: the envelope goes into a
   per-queue delayed sorted set (`<prefix>:<queue>:delayed`) scored with the time
@@ -115,25 +120,44 @@ retries are exhausted, on the dead-letter list:
   retry waits `backoffBase` (default 1s), each further one doubles up to
   `backoffCap` (default 60s) — plus a little jitter so a burst of failures
   doesn't re-fire in lockstep. All three are configurable on `Worker.connect`.
-- **Due-mover.** Each poll-loop pass, before it blocks on `BRPOP`, the worker
+- **Crash-safe at-least-once delivery.** The worker claims a task by atomically
+  moving it (`LMOVE`) from its pending list onto a per-worker in-flight list,
+  and only removes it from there once the task is done, retried, or
+  dead-lettered — each of those transitions is a single Lua step, so the task is
+  never off both lists at once. If the worker process dies mid-task (a crash, an
+  OOM kill, a lost node), the envelope stays on the in-flight list; on its next
+  `run` the worker requeues everything left on its own list and runs it again.
+  Nothing is silently lost. The trade is that a task can run more than once (it
+  crashed after finishing but before the removal), so **handlers must be
+  idempotent** — the same contract as Sidekiq or Asynq.
+- **Due-mover.** Each poll-loop pass, before it claims the next task, the worker
   promotes any delayed tasks whose score has passed back onto their pending
   list. The move runs inside a single Redis Lua script (`ZRANGEBYSCORE` +
   `ZREM` + `LPUSH`), so it's atomic — a task can't be lost or duplicated, even
-  if several workers run the mover at once. Because the pop uses a short (1s)
-  timeout, a due task waits at most about a second past its scheduled time.
+  if several workers run the mover at once. Claims use a short (1s) blocking
+  wait, so a due task waits at most about a second past its scheduled time.
 - **Dead-letter list.** Once retries are exhausted, the envelope moves to a
   dead-letter list (`<prefix>:dead`) instead of looping forever, so you can
   inspect what failed.
 - **Missing handler = failure.** A task with no registered handler is retried,
   not silently dropped, so a wiring mistake surfaces loudly.
 
+## Recovery and worker ids
+
+In-flight recovery keys off `workerId` (default: the host name). A restarted
+worker reclaims tasks only from its **own** in-flight list, never a live peer's,
+so give each worker a stable id that survives a restart — a pod, service, or
+host name. In Kubernetes a `StatefulSet` pod name or an explicit `WORKER_ID`
+env works well.
+
+The one case this doesn't cover on its own: a worker that dies and is *never*
+restarted with the same id (an ephemeral pod that comes back under a fresh
+name). Its in-flight list has no owner to reclaim it. If your deployment can do
+that, run workers under stable ids, or have a supervisor requeue any
+`<prefix>:inflight:*` list belonging to an id that is no longer running.
+
 ## What this version keeps small (on purpose)
 
-- **No in-flight tracking.** A task is popped with `BRPOP`, so if a worker
-  crashes between the pop and finishing (or re-scheduling) the task, that task
-  is lost — there's no processing set or visibility timeout to recover it. The
-  delayed-retry mover itself is atomic and safe across workers; this caveat is
-  about the pop/handle step, and it's out of scope for this version.
 - **No recurring schedules (cron), no unique-task dedup, no web UI.** One-shot
   scheduling (`processAt` / `processIn`) shipped in 0.3.0; recurring schedules
   are still out. The goal is the enqueue → process → backoff-retry →

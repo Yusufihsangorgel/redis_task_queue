@@ -1,3 +1,27 @@
+## 0.5.0
+
+- Crash-safe at-least-once delivery. The worker now claims a task by atomically
+  moving it (`LMOVE`) onto a per-worker in-flight list and only removes it once
+  the task is done, retried, or dead-lettered. A worker that dies mid-task
+  leaves the envelope on its in-flight list and requeues it on its next `run`,
+  so a crash, OOM kill, or lost node no longer loses the task in progress.
+  Previously the worker popped with `BRPOP`, so a task being handled when the
+  process died was gone. Delivery is at-least-once: a task can run again after a
+  crash, so **handlers must be idempotent**.
+- New `workerId` on `Worker.connect` (default: the host name) names the
+  in-flight list a restarted worker recovers from. Set it to something stable
+  across restarts (a pod or service name); two workers must never share one. See
+  the README's "Recovery and worker ids" for the one case this doesn't cover on
+  its own (a worker that never restarts under the same id).
+- Real weighted fair scheduling. The worker draws each queue's turn in
+  proportion to its weight with a rotating cursor over the weighted order, so
+  `{'critical': 6, 'default': 3, 'low': 1}` is served roughly 6:3:1 under load
+  and, unlike strict priority, a flood of critical jobs can't fully starve
+  `low`. The previous `BRPOP` over a repeated key list was really strict
+  priority; the weights only set the order.
+- Docs: the flow and state diagrams now show the in-flight list and the
+  crash-recovery path.
+
 ## 0.4.1
 
 - Docs: replace the two README mermaid diagrams with rendered PNGs. pub.dev does

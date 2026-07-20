@@ -21,4 +21,12 @@ class Keys {
 
   /// The list holding envelopes that exhausted their retries.
   String deadLetter() => '$prefix:dead';
+
+  /// The per-worker in-flight list: envelopes a worker has taken off [pending]
+  /// but not yet finished. A task is atomically moved here as it is claimed and
+  /// removed once it is done, retried, or dead-lettered, so a worker that dies
+  /// mid-task leaves the envelope here instead of losing it. The id is
+  /// per-worker so a restarted worker recovers only its own orphans, never a
+  /// live peer's in-flight work.
+  String inFlight(String workerId) => '$prefix:inflight:$workerId';
 }

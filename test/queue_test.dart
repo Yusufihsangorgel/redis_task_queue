@@ -22,9 +22,14 @@ Future<Command> _connect() async {
   return conn.connect(_host, _port);
 }
 
+// Delete only this suite's keys, not the whole DB: test files run concurrently
+// against one Redis, so a blanket FLUSHDB would wipe another suite mid-test.
 Future<void> _flush() async {
   final cmd = await _connect();
-  await cmd.send_object(['FLUSHDB']);
+  final keys = await cmd.send_object(['KEYS', '$_prefix:*']) as List;
+  if (keys.isNotEmpty) {
+    await cmd.send_object(['DEL', ...keys.cast<String>()]);
+  }
   await cmd.get_connection().close();
 }
 
@@ -337,6 +342,56 @@ void main() {
     expect(errors.map((e) => e.attempt).toList(), [1, 2]);
     expect(errors.map((e) => e.willRetry).toList(), [true, false]);
     expect(errors.every((e) => e.error is StateError), isTrue);
+
+    worker.stop();
+    await loop.timeout(const Duration(seconds: 3));
+    await client.close();
+    await worker.close();
+  });
+
+  test('the worker gives each queue first look in proportion to its weight',
+      () async {
+    final client =
+        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    // Weights 3:2:1. Enqueue exactly the weight count to each queue, all up
+    // front, so one full weighted cycle drains them and the lead order is
+    // deterministic.
+    final worker = await Worker.connect(
+      host: _host,
+      port: _port,
+      prefix: _prefix,
+      queues: {'a': 3, 'b': 2, 'c': 1},
+      workerId: 'fairness-worker',
+    );
+
+    final processed = <String>[];
+    final done = Completer<void>();
+    void record(Task task) {
+      processed.add(task.payload['q'] as String);
+      if (processed.length == 6 && !done.isCompleted) done.complete();
+    }
+
+    worker.handle('a', record);
+    worker.handle('b', record);
+    worker.handle('c', record);
+
+    // Enqueue to each queue's pending list. QueueClient.enqueue takes the queue
+    // via its `queue` argument.
+    for (var i = 0; i < 3; i++) {
+      await client.enqueue(Task('a', {'q': 'a'}), queue: 'a');
+    }
+    for (var i = 0; i < 2; i++) {
+      await client.enqueue(Task('b', {'q': 'b'}), queue: 'b');
+    }
+    await client.enqueue(Task('c', {'q': 'c'}), queue: 'c');
+
+    final loop = worker.run();
+    await done.future.timeout(const Duration(seconds: 8));
+
+    // A fresh worker's cursor starts at 0, so the weighted order [a,a,a,b,b,c]
+    // is followed exactly: the high-weight queue leads first, but the
+    // low-weight queue still gets its turn within the cycle.
+    expect(processed, ['a', 'a', 'a', 'b', 'b', 'c']);
 
     worker.stop();
     await loop.timeout(const Duration(seconds: 3));
