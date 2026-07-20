@@ -144,10 +144,12 @@ return 1
 ''';
 
   /// Removes the in-flight envelope and dead-letters it in one atomic step.
-  /// KEYS[1] in-flight list, KEYS[2] dead-letter list; ARGV[1] the envelope.
+  /// KEYS[1] in-flight list, KEYS[2] dead-letter list; ARGV[1] the in-flight
+  /// envelope to remove, ARGV[2] the dead-letter entry to store (the envelope
+  /// wrapped with the failure that gave up on it).
   static const _deadScript = '''
 redis.call('LREM', KEYS[1], 1, ARGV[1])
-redis.call('LPUSH', KEYS[2], ARGV[1])
+redis.call('LPUSH', KEYS[2], ARGV[2])
 return 1
 ''';
 
@@ -396,9 +398,14 @@ return 0
     final inFlight = _keys.inFlight(_workerId);
     if (env.attempt >= env.maxRetries) {
       // Remove from in-flight and dead-letter in one atomic step so a crash
-      // can't do one without the other.
+      // can't do one without the other. The stored entry carries the error, so
+      // the dead-letter list is inspectable instead of holding a bare task.
+      final deadEntry = env.encodeDead(
+        error.toString(),
+        DateTime.now().millisecondsSinceEpoch,
+      );
       await _command.send_object(
-        ['EVAL', _deadScript, '2', inFlight, _keys.deadLetter(), raw],
+        ['EVAL', _deadScript, '2', inFlight, _keys.deadLetter(), raw, deadEntry],
       );
       _notify(() => _onDeadLetter?.call(env.task, context, error, stackTrace));
       return;

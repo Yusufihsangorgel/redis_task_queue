@@ -144,11 +144,34 @@ retries are exhausted, on the dead-letter list:
   `ZREM` + `LPUSH`), so it's atomic — a task can't be lost or duplicated, even
   if several workers run the mover at once. Claims use a short (1s) blocking
   wait, so a due task waits at most about a second past its scheduled time.
-- **Dead-letter list.** Once retries are exhausted, the envelope moves to a
-  dead-letter list (`<prefix>:dead`) instead of looping forever, so you can
-  inspect what failed.
+- **Dead-letter list.** Once retries are exhausted, the task moves to a
+  dead-letter list (`<prefix>:dead`) instead of looping forever, stored with the
+  error that gave up on it. `QueueClient` reads and manages it: `deadLetters()`
+  returns the entries (each a `DeadLetter` with the task, the queue, the error
+  text, the attempt count, and when it died), `replayDeadLetter(id)` re-enqueues
+  one onto its queue for a fresh set of attempts once you have fixed the cause,
+  and `purgeDeadLetters()` clears them out. Nothing drains the list for you, so
+  a queue nobody reads is an outage nobody hears about.
 - **Missing handler = failure.** A task with no registered handler is retried,
   not silently dropped, so a wiring mistake surfaces loudly.
+
+## Triaging the dead-letter list
+
+```dart
+for (final dead in await client.deadLetters()) {
+  print('${dead.task.type} ${dead.id} failed: ${dead.error}');
+}
+
+// After fixing what broke, send one back for another try:
+await client.replayDeadLetter(deadId);
+
+// Or clear entries that are not worth replaying:
+await client.purgeDeadLetters();
+```
+
+A replay removes the entry and re-enqueues the task in one atomic step, so it
+can't be dropped from the dead-letter list without landing back on its queue,
+or enqueued twice if two callers replay it at once.
 
 ## Recovery and worker ids
 

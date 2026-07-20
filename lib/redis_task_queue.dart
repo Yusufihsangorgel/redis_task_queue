@@ -6,5 +6,5 @@
 library;
 
 export 'src/client.dart';
-export 'src/task.dart' show Task, TaskContext;
+export 'src/task.dart' show Task, TaskContext, DeadLetter;
 export 'src/worker.dart';

@@ -96,12 +96,102 @@ class Envelope {
 
   static Envelope decode(String raw) {
     final json = jsonDecode(raw) as Map<String, dynamic>;
-    return Envelope(
-      id: json['id'] as String,
-      task: Task.fromJson((json['task'] as Map).cast<String, dynamic>()),
-      queue: json['queue'] as String,
-      maxRetries: json['max_retries'] as int,
-      attempt: json['attempt'] as int,
+    return Envelope.fromJson(json);
+  }
+
+  static Envelope fromJson(Map<String, dynamic> json) => Envelope(
+        id: json['id'] as String,
+        task: Task.fromJson((json['task'] as Map).cast<String, dynamic>()),
+        queue: json['queue'] as String,
+        maxRetries: json['max_retries'] as int,
+        attempt: json['attempt'] as int,
+      );
+
+  /// Wraps this envelope for the dead-letter list, keeping the failure that
+  /// gave up on it. [error] is the last attempt's error, [deadAt] when it was
+  /// dead-lettered.
+  String encodeDead(String error, int deadAt) => jsonEncode({
+        'envelope': {
+          'id': id,
+          'task': task.toJson(),
+          'queue': queue,
+          'max_retries': maxRetries,
+          'attempt': attempt,
+        },
+        'error': error,
+        'dead_at': deadAt,
+      });
+}
+
+/// A task that exhausted its retries and is parked on the dead-letter list,
+/// together with why it failed.
+///
+/// This is what [QueueClient.deadLetters] returns, the raw material for triage:
+/// see what died and why, then decide whether to [QueueClient.replayDeadLetter]
+/// it after fixing the cause, or drop it.
+class DeadLetter {
+  DeadLetter({
+    required this.id,
+    required this.task,
+    required this.queue,
+    required this.error,
+    required this.attempts,
+    required this.deadAt,
+    required this.raw,
+  });
+
+  /// The task's id, the same one [enqueue] returned and the handler saw.
+  final String id;
+
+  /// The task that failed.
+  final Task task;
+
+  /// The queue it was on.
+  final String queue;
+
+  /// The last attempt's error, as text. Empty when the entry predates 0.8.0,
+  /// which did not store it.
+  final String error;
+
+  /// How many attempts were made in all before giving up (the first run plus
+  /// its retries).
+  final int attempts;
+
+  /// When it was dead-lettered, or null for a pre-0.8.0 entry.
+  final DateTime? deadAt;
+
+  /// The exact stored string, kept so a replay can remove this precise entry.
+  final String raw;
+
+  /// Decodes a dead-letter entry. Tolerates the pre-0.8.0 format, a bare
+  /// envelope with no error, so a list written by an older worker still reads.
+  static DeadLetter decode(String raw) {
+    final json = jsonDecode(raw) as Map<String, dynamic>;
+    final envelopeJson = json['envelope'];
+    final Envelope envelope;
+    final String error;
+    final DateTime? deadAt;
+    if (envelopeJson is Map) {
+      envelope = Envelope.fromJson(envelopeJson.cast<String, dynamic>());
+      error = (json['error'] as String?) ?? '';
+      final deadMillis = json['dead_at'] as int?;
+      deadAt = deadMillis == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(deadMillis);
+    } else {
+      // Old format: the stored string is the envelope itself.
+      envelope = Envelope.fromJson(json);
+      error = '';
+      deadAt = null;
+    }
+    return DeadLetter(
+      id: envelope.id,
+      task: envelope.task,
+      queue: envelope.queue,
+      error: error,
+      attempts: envelope.attempt + 1,
+      deadAt: deadAt,
+      raw: raw,
     );
   }
 }

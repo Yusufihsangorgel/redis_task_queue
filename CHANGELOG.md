@@ -1,3 +1,18 @@
+## 0.8.0
+
+- The dead-letter list is now inspectable and manageable, which the README has
+  claimed since the start without an API to back it. A dead-lettered task is
+  stored with the error that gave up on it, not as a bare envelope, and
+  `QueueClient` gains three methods: `deadLetters({limit})` returns the entries
+  as `DeadLetter` (task, queue, error text, attempt count, dead-at time),
+  `replayDeadLetter(id)` re-enqueues one for a fresh set of attempts, and
+  `purgeDeadLetters()` clears them. A replay removes the entry and re-enqueues
+  in one atomic step, so it can't be dropped without landing back on its queue
+  or double-enqueued by two concurrent callers.
+- Additive and backward-compatible: `DeadLetter.decode` reads a pre-0.8.0 entry
+  (a bare envelope with no stored error) too, so an existing dead-letter list
+  still reads after the upgrade.
+
 ## 0.7.1
 
 - Make task ids unique across producer processes. The id was

@@ -79,6 +79,82 @@ class QueueClient {
     return id;
   }
 
+  /// The dead-letter entries, newest first, up to [limit].
+  ///
+  /// A task that exhausts its retries lands here with the error that gave up on
+  /// it. Read them to see what failed and why; nothing drains the list on its
+  /// own, so a queue nobody inspects is an outage nobody hears about.
+  Future<List<DeadLetter>> deadLetters({int limit = 100}) async {
+    if (limit < 1) {
+      throw ArgumentError.value(limit, 'limit', 'must be at least 1');
+    }
+    final raw = await _command.send_object(
+      ['LRANGE', _keys.deadLetter(), '0', '${limit - 1}'],
+    ) as List;
+    return [for (final entry in raw) DeadLetter.decode(entry as String)];
+  }
+
+  /// Re-enqueues the dead-letter entry with task id [id] onto its original
+  /// queue for a fresh set of attempts, and removes it from the dead-letter
+  /// list. Returns whether an entry with that id was found.
+  ///
+  /// The remove and the re-enqueue happen in one atomic step, so a task can't
+  /// be dropped from the dead-letter list without landing back on its queue, or
+  /// enqueued twice if two callers replay it at once. Do this after fixing what
+  /// made the task fail; replaying an unfixed task just sends it back to the
+  /// dead-letter list.
+  Future<bool> replayDeadLetter(String id) async {
+    final raw = await _command.send_object(
+      ['LRANGE', _keys.deadLetter(), '0', '-1'],
+    ) as List;
+    for (final entry in raw.cast<String>()) {
+      final dead = DeadLetter.decode(entry);
+      if (dead.id != id) continue;
+      // Rebuild the task fresh: a replay starts its retry budget over.
+      final fresh = Envelope(
+        id: dead.id,
+        task: dead.task,
+        queue: dead.queue,
+        // maxRetries is not stored on DeadLetter, so recover it from attempts:
+        // attempts == maxRetries + 1.
+        maxRetries: dead.attempts - 1,
+      );
+      final moved = await _command.send_object([
+        'EVAL',
+        _replayScript,
+        '2',
+        _keys.deadLetter(),
+        _keys.pending(dead.queue),
+        entry, // ARGV[1]: the exact dead entry to remove
+        fresh.encode(), // ARGV[2]: the fresh envelope to enqueue
+      ]);
+      return moved == 1;
+    }
+    return false;
+  }
+
+  /// Atomically removes one exact dead entry and enqueues a fresh envelope, so
+  /// a concurrent replay of the same entry can't double-enqueue it. KEYS[1]
+  /// dead-letter list, KEYS[2] pending list; ARGV[1] the dead entry to remove,
+  /// ARGV[2] the fresh envelope to push. Returns 1 if it removed and enqueued,
+  /// 0 if the entry was already gone.
+  static const _replayScript = '''
+if redis.call('LREM', KEYS[1], 1, ARGV[1]) == 1 then
+  redis.call('LPUSH', KEYS[2], ARGV[2])
+  return 1
+end
+return 0
+''';
+
+  /// Empties the dead-letter list and returns how many entries it removed. Use
+  /// it once the entries have been triaged and are not worth replaying.
+  Future<int> purgeDeadLetters() async {
+    final count =
+        await _command.send_object(['LLEN', _keys.deadLetter()]) as int;
+    await _command.send_object(['DEL', _keys.deadLetter()]);
+    return count;
+  }
+
   Future<void> close() => _command.get_connection().close();
 
   // A time-free, collision-resistant-enough id for a job. Not a UUID library on
