@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:redis/redis.dart';
 
 import 'keys.dart';
@@ -8,10 +10,23 @@ import 'task.dart';
 /// app and reuse it: enqueuing is a single LPUSH (a single ZADD for a
 /// scheduled task).
 class QueueClient {
-  QueueClient._(this._command, this._keys);
+  QueueClient._(this._command, this._keys) : _idPrefix = _randomPrefix();
 
   final Command _command;
   final Keys _keys;
+
+  /// A random prefix drawn once per client, so ids are unique across processes,
+  /// not just within one. See [_newId].
+  final String _idPrefix;
+
+  /// Twelve bytes (96 bits) of secure randomness as hex, unique per client with
+  /// overwhelming probability: two clients would have to draw the same 96-bit
+  /// value to collide.
+  static String _randomPrefix() {
+    final random = Random.secure();
+    final bytes = [for (var i = 0; i < 12; i++) random.nextInt(256)];
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
 
   /// Connects to Redis and returns a ready client. [prefix] namespaces all
   /// keys so the queue can share a Redis instance with other data.
@@ -69,8 +84,19 @@ class QueueClient {
   // A time-free, collision-resistant-enough id for a job. Not a UUID library on
   // purpose — the queue shouldn't pull in a dependency for this.
   var _counter = 0;
+
+  /// A task id, unique across producer processes.
+  ///
+  /// The id is the deduplication key an idempotent handler writes against
+  /// ([TaskContext.id]), so a collision between two different tasks would make
+  /// a handler treat the second as a repeat of the first and skip it: silent
+  /// data loss. The old id was `identityHashCode(this)` plus a per-process
+  /// counter, both of which reset or repeat across processes, so two producers
+  /// could mint the same id. This pairs a per-client random prefix with the
+  /// counter, so the prefix separates clients and the counter orders within
+  /// one.
   String _newId() {
     _counter++;
-    return '${identityHashCode(this).toRadixString(16)}-$_counter';
+    return '$_idPrefix-$_counter';
   }
 }

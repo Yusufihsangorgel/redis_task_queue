@@ -1,3 +1,17 @@
+## 0.7.1
+
+- Make task ids unique across producer processes. The id was
+  `identityHashCode(this)` plus a per-process counter, and both reset or repeat
+  when a new process starts, so two producers could mint the same id. Since the
+  id is the deduplication key an idempotent handler writes against, a collision
+  meant one task was silently taken for a repeat of another and skipped: data
+  loss in the exact place the package tells you to rely on the id. Measured: of
+  100,000 fresh clients, several produced an identical first id. Ids now pair a
+  per-client 96-bit secure-random prefix with the counter, so the prefix
+  separates processes and the counter orders within one. No new dependency;
+  no API change. A test enqueues from 200 clients and asserts every id is
+  distinct.
+
 ## 0.7.0
 
 - **Breaking:** `onError` and `onDeadLetter` now receive the run's
