@@ -1,3 +1,21 @@
+## 0.10.1
+
+- `QueueClient` and `Worker` now reconnect after a dropped Redis connection
+  instead of failing every call for the rest of their lifetime. Neither this
+  package nor the underlying `redis` client ever redialed a dead socket, so a
+  Redis restart, a managed-Redis failover, or a proxy's idle timeout broke a
+  long-running worker or a reused client permanently, even minutes after Redis
+  was healthy again. Reproduced against a real Redis: `Worker.run()` crashed
+  with an unhandled `stream is closed` exception on the exact try/catch-free
+  pattern README.md shows, and `QueueClient.enqueue()`, reused across calls
+  the way README.md recommends, kept failing on the same client well after
+  Redis had come back up. Every Redis command in both classes now retries
+  once through a fresh connection before giving up, and `run()`'s poll loop
+  reconnects and reruns orphan recovery instead of exiting when that retry
+  fails too, so a dropped connection ends one call, not the worker. No API
+  change: `connect()` takes the same arguments, and behavior is unchanged as
+  long as the connection never drops.
+
 ## 0.10.0
 
 - `stop()` is now awaitable: it returns a future that completes once the worker

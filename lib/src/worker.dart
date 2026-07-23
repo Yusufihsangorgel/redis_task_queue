@@ -67,7 +67,9 @@ class Worker {
     this._command,
     this._keys,
     this._queues,
-    this._workerId, {
+    this._workerId,
+    this._host,
+    this._port, {
     required Duration backoffBase,
     required Duration backoffCap,
     required double backoffJitter,
@@ -79,9 +81,11 @@ class Worker {
         _onError = onError,
         _onDeadLetter = onDeadLetter;
 
-  final Command _command;
+  Command _command;
   final Keys _keys;
   final Map<String, int> _queues;
+  final String _host;
+  final int _port;
 
   /// Names this worker's in-flight list. A restarted worker with the same id
   /// reclaims the tasks it was mid-way through when it died; see [connect].
@@ -202,19 +206,47 @@ return 0
     TaskErrorCallback? onError,
     TaskDeadLetterCallback? onDeadLetter,
   }) async {
-    final conn = RedisConnection();
-    final command = await conn.connect(host, port);
+    final command = await _dial(host, port);
     return Worker._(
       command,
       Keys(prefix),
       queues,
       workerId ?? Platform.localHostname,
+      host,
+      port,
       backoffBase: backoffBase,
       backoffCap: backoffCap,
       backoffJitter: backoffJitter,
       onError: onError,
       onDeadLetter: onDeadLetter,
     );
+  }
+
+  static Future<Command> _dial(String host, int port) =>
+      RedisConnection().connect(host, port);
+
+  /// Opens a fresh connection and swaps it in, discarding whatever socket
+  /// [_command] was wrapping. Used both by [_send]'s one-shot retry and by
+  /// [run]'s poll loop after that retry has already failed once.
+  Future<void> _reconnect() async {
+    _command = await _dial(_host, _port);
+  }
+
+  /// Sends [command] to Redis, reconnecting and retrying once if it fails.
+  ///
+  /// Same rationale as [QueueClient._send]: the underlying `redis` package
+  /// never redials a dead socket on its own, and its errors for that aren't a
+  /// consistent type, so any failure here is treated as "the socket might be
+  /// dead" rather than pattern-matched. A second failure after the retry means
+  /// Redis is actually down, so it is rethrown; [run]'s poll loop is what
+  /// catches that and keeps retrying instead of crashing the worker.
+  Future<dynamic> _send(List<Object> command) async {
+    try {
+      return await _command.send_object(command);
+    } catch (_) {
+      await _reconnect();
+      return await _command.send_object(command);
+    }
   }
 
   /// Registers [handler] for tasks of [type]. A task with no registered handler
@@ -236,6 +268,11 @@ return 0
   /// Runs the poll loop until [stop] is called. First requeues anything a
   /// previous run of this worker left in flight, then, each iteration, promotes
   /// any delayed tasks that have come due and claims the next one to run.
+  ///
+  /// A dropped Redis connection (a restart, a failover, a proxy's idle
+  /// timeout) does not end the loop: it reconnects and keeps polling, running
+  /// recovery again first in case anything was in flight when the connection
+  /// dropped. What ends the loop is [stop].
   Future<void> run() async {
     _running = true;
     _drained = Completer<void>();
@@ -250,20 +287,39 @@ return 0
           ? ''
           : _queues.entries.reduce((a, b) => b.value > a.value ? b : a).key;
       while (_running) {
-        // Promote due tasks (scheduled tasks and elapsed retry backoffs) before
-        // claiming. Pairing this with the short (1s) blocking claim below keeps
-        // the claim from starving the mover: it parks for at most a second,
-        // then the loop cycles back here, so a due task waits no longer than
-        // roughly that timeout past its scheduled time. No separate
-        // timer/isolate needed.
-        await _promoteDue();
-        final claimed = await _claim(weighted, topQueue);
-        // Nothing was ready within the blocking window; loop and promote again.
-        if (claimed == null) continue;
-        // A task claimed just before stop() still runs to completion: it has
-        // already been moved onto the in-flight list, so finishing it is the
-        // clean end, not leaving it for recovery.
-        await _process(claimed);
+        try {
+          // Promote due tasks (scheduled tasks and elapsed retry backoffs) before
+          // claiming. Pairing this with the short (1s) blocking claim below keeps
+          // the claim from starving the mover: it parks for at most a second,
+          // then the loop cycles back here, so a due task waits no longer than
+          // roughly that timeout past its scheduled time. No separate
+          // timer/isolate needed.
+          await _promoteDue();
+          final claimed = await _claim(weighted, topQueue);
+          // Nothing was ready within the blocking window; loop and promote again.
+          if (claimed == null) continue;
+          // A task claimed just before stop() still runs to completion: it has
+          // already been moved onto the in-flight list, so finishing it is the
+          // clean end, not leaving it for recovery.
+          await _process(claimed);
+        } catch (_) {
+          // Every call above already went through _send, which reconnects and
+          // retries once on its own; getting here means that retry failed too,
+          // so the connection isn't just blipped, it's still down. Back off
+          // before hammering a Redis that may not be back yet, then reconnect
+          // and rerun recovery: a fresh socket doesn't invalidate anything
+          // already sitting on the in-flight list on the Redis side, but the
+          // worker should treat "just reconnected" like "just started" for
+          // recovery purposes, the same as the very first line of this method.
+          if (!_running) break;
+          await Future<void>.delayed(_backoffBase);
+          try {
+            await _reconnect();
+            await _recoverOrphans();
+          } catch (_) {
+            // Still down; the next pass through this loop retries again.
+          }
+        }
       }
     } finally {
       _drained?.complete();
@@ -309,12 +365,12 @@ return 0
     _claimCursor = (_claimCursor + 1) % n;
 
     for (final queue in order) {
-      final raw = await _command.send_object(
+      final raw = await _send(
         ['LMOVE', _keys.pending(queue), inFlight, 'RIGHT', 'LEFT'],
       );
       if (raw != null) return raw as String;
     }
-    final raw = await _command.send_object(
+    final raw = await _send(
       ['BLMOVE', _keys.pending(topQueue), inFlight, 'RIGHT', 'LEFT', '1'],
     );
     // A hit returns the moved envelope as a String; on timeout the client
@@ -329,8 +385,7 @@ return 0
   /// shares a [_workerId], so this can't steal work in progress elsewhere.
   Future<void> _recoverOrphans() async {
     final inFlight = _keys.inFlight(_workerId);
-    final orphans =
-        await _command.send_object(['LRANGE', inFlight, '0', '-1']) as List;
+    final orphans = await _send(['LRANGE', inFlight, '0', '-1']) as List;
     for (final raw in orphans) {
       final Envelope env;
       try {
@@ -338,7 +393,7 @@ return 0
       } catch (_) {
         continue; // Unparseable; leave it rather than crash recovery.
       }
-      await _command.send_object([
+      await _send([
         'EVAL',
         _recoverScript,
         '2',
@@ -354,7 +409,7 @@ return 0
   Future<void> _promoteDue() async {
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final queue in _queues.keys) {
-      await _command.send_object([
+      await _send([
         'EVAL',
         _promoteScript,
         '2',
@@ -389,7 +444,7 @@ return 0
     // Done: drop the envelope from the in-flight list. If the worker dies before
     // this runs, recovery requeues the task on the next start and an idempotent
     // handler absorbs the repeat.
-    await _command.send_object(
+    await _send(
       ['LREM', _keys.inFlight(_workerId), '1', raw],
     );
   }
@@ -418,8 +473,16 @@ return 0
         error.toString(),
         DateTime.now().millisecondsSinceEpoch,
       );
-      await _command.send_object(
-        ['EVAL', _deadScript, '2', inFlight, _keys.deadLetter(), raw, deadEntry],
+      await _send(
+        [
+          'EVAL',
+          _deadScript,
+          '2',
+          inFlight,
+          _keys.deadLetter(),
+          raw,
+          deadEntry
+        ],
       );
       _notify(() => _onDeadLetter?.call(env.task, context, error, stackTrace));
       return;
@@ -431,7 +494,7 @@ return 0
     // The run loop's mover promotes it once due.
     final dueAt = DateTime.now().millisecondsSinceEpoch +
         _backoffFor(env.attempt).inMilliseconds;
-    await _command.send_object([
+    await _send([
       'EVAL',
       _retryScript,
       '2',

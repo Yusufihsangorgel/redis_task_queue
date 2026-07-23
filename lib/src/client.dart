@@ -9,12 +9,17 @@ import 'task.dart';
 
 /// Enqueues tasks onto Redis. Safe to keep one client for the lifetime of your
 /// app and reuse it: enqueuing is a single LPUSH (a single ZADD for a
-/// scheduled task).
+/// scheduled task). A dropped connection doesn't end that lifetime either: the
+/// next call reconnects and retries once before giving up, so a Redis restart
+/// or failover doesn't permanently break a client that survives it.
 class QueueClient {
-  QueueClient._(this._command, this._keys) : _idPrefix = _randomPrefix();
+  QueueClient._(this._command, this._keys, this._host, this._port)
+      : _idPrefix = _randomPrefix();
 
-  final Command _command;
+  Command _command;
   final Keys _keys;
+  final String _host;
+  final int _port;
 
   /// A random prefix drawn once per client, so ids are unique across processes,
   /// not just within one. See [_newId].
@@ -36,9 +41,32 @@ class QueueClient {
     int port = 6379,
     String prefix = 'rtq',
   }) async {
-    final conn = RedisConnection();
-    final command = await conn.connect(host, port);
-    return QueueClient._(command, Keys(prefix));
+    final command = await _dial(host, port);
+    return QueueClient._(command, Keys(prefix), host, port);
+  }
+
+  static Future<Command> _dial(String host, int port) =>
+      RedisConnection().connect(host, port);
+
+  /// Sends [command] to Redis, reconnecting and retrying once if it fails.
+  ///
+  /// The underlying `redis` package holds one socket for the whole life of the
+  /// connection and never redials it: once that socket dies (a Redis restart, a
+  /// managed-Redis failover, a proxy's idle timeout), every call on it fails
+  /// forever, even long after Redis is healthy again. The package's errors for
+  /// this aren't even a consistent type across failures (a bare `"stream is
+  /// closed"` String, a `StateError`, a real `SocketException`), so rather than
+  /// pattern-match them, any failure here is treated as "the socket might be
+  /// dead": open a fresh connection and retry the same command once. A second
+  /// failure after that means Redis is actually down, not just blipped, so it
+  /// is rethrown rather than retried forever.
+  Future<dynamic> _send(List<Object> command) async {
+    try {
+      return await _command.send_object(command);
+    } catch (_) {
+      _command = await _dial(_host, _port);
+      return await _command.send_object(command);
+    }
   }
 
   /// Enqueues [task] and returns its id. [queue] selects which queue it lands
@@ -66,7 +94,7 @@ class QueueClient {
       maxRetries: maxRetries,
     );
     if (processAt == null && processIn == null) {
-      await _command.send_object(['LPUSH', _keys.pending(queue), env.encode()]);
+      await _send(['LPUSH', _keys.pending(queue), env.encode()]);
       return id;
     }
     final dueAt = dueAtMillis(
@@ -74,7 +102,7 @@ class QueueClient {
       processIn: processIn,
       now: DateTime.now(),
     );
-    await _command.send_object(
+    await _send(
       ['ZADD', _keys.delayed(queue), '$dueAt', env.encode()],
     );
     return id;
@@ -89,7 +117,7 @@ class QueueClient {
     if (limit < 1) {
       throw ArgumentError.value(limit, 'limit', 'must be at least 1');
     }
-    final raw = await _command.send_object(
+    final raw = await _send(
       ['LRANGE', _keys.deadLetter(), '0', '${limit - 1}'],
     ) as List;
     return [for (final entry in raw) DeadLetter.decode(entry as String)];
@@ -105,7 +133,7 @@ class QueueClient {
   /// made the task fail; replaying an unfixed task just sends it back to the
   /// dead-letter list.
   Future<bool> replayDeadLetter(String id) async {
-    final raw = await _command.send_object(
+    final raw = await _send(
       ['LRANGE', _keys.deadLetter(), '0', '-1'],
     ) as List;
     for (final entry in raw.cast<String>()) {
@@ -120,7 +148,7 @@ class QueueClient {
         // attempts == maxRetries + 1.
         maxRetries: dead.attempts - 1,
       );
-      final moved = await _command.send_object([
+      final moved = await _send([
         'EVAL',
         _replayScript,
         '2',
@@ -150,9 +178,8 @@ return 0
   /// Empties the dead-letter list and returns how many entries it removed. Use
   /// it once the entries have been triaged and are not worth replaying.
   Future<int> purgeDeadLetters() async {
-    final count =
-        await _command.send_object(['LLEN', _keys.deadLetter()]) as int;
-    await _command.send_object(['DEL', _keys.deadLetter()]);
+    final count = await _send(['LLEN', _keys.deadLetter()]) as int;
+    await _send(['DEL', _keys.deadLetter()]);
     return count;
   }
 
@@ -171,25 +198,20 @@ return 0
   /// This reads counters, not the tasks, so it is cheap enough to poll for a
   /// dashboard or an alert on a growing backlog.
   Future<QueueStats> stats({Iterable<String>? queues}) async {
-    final names = queues != null
-        ? queues.toSet()
-        : await _discoverQueues();
+    final names = queues != null ? queues.toSet() : await _discoverQueues();
 
     final pending = <String, int>{};
     final delayed = <String, int>{};
     for (final queue in names) {
-      pending[queue] =
-          await _command.send_object(['LLEN', _keys.pending(queue)]) as int;
-      delayed[queue] =
-          await _command.send_object(['ZCARD', _keys.delayed(queue)]) as int;
+      pending[queue] = await _send(['LLEN', _keys.pending(queue)]) as int;
+      delayed[queue] = await _send(['ZCARD', _keys.delayed(queue)]) as int;
     }
 
-    final deadLetter =
-        await _command.send_object(['LLEN', _keys.deadLetter()]) as int;
+    final deadLetter = await _send(['LLEN', _keys.deadLetter()]) as int;
 
     var inFlight = 0;
     for (final key in await _scanKeys('${_keys.prefix}:inflight:*')) {
-      inFlight += await _command.send_object(['LLEN', key]) as int;
+      inFlight += await _send(['LLEN', key]) as int;
     }
 
     return QueueStats(
@@ -220,7 +242,7 @@ return 0
     final keys = <String>[];
     var cursor = '0';
     do {
-      final result = await _command.send_object(
+      final result = await _send(
         ['SCAN', cursor, 'MATCH', pattern, 'COUNT', '100'],
       ) as List;
       cursor = result[0] as String;

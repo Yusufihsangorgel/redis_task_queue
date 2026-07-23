@@ -147,6 +147,15 @@ retries are exhausted, on the dead-letter list:
   identical on every attempt and every recovery, so it is the key to write
   against the effect. `example/at_least_once.dart` stages the crash and counts
   the result, with and without that defence.
+- **Reconnects after a dropped connection.** Neither a `Worker` nor a
+  `QueueClient` breaks permanently when the connection to Redis drops (a
+  restart, a managed-Redis failover, a proxy's idle timeout): every Redis call
+  in both classes retries once through a fresh connection before giving up.
+  For `QueueClient`, a call whose retry also fails still throws — Redis is
+  genuinely down, not just blipped, and the caller needs to know that. For
+  `Worker.run()`, that same failure doesn't end the loop: it backs off,
+  reconnects, reruns orphan recovery, and keeps polling, so a dropped
+  connection costs a delay, not the worker.
 - **Due-mover.** Each poll-loop pass, before it claims the next task, the worker
   promotes any delayed tasks whose score has passed back onto their pending
   list. The move runs inside a single Redis Lua script (`ZRANGEBYSCORE` +
