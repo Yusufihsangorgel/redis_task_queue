@@ -215,6 +215,13 @@ so give each worker a stable id that survives a restart — a pod, service, or
 host name. In Kubernetes a `StatefulSet` pod name or an explicit `WORKER_ID`
 env works well.
 
+> **Run two workers on one host and you must give them distinct ids.** The
+> default id is the bare host name, so two workers started on the same machine
+> share it — and on startup each one's recovery treats the other's live
+> in-flight tasks as its own orphans and reclaims them, running them twice.
+> Pass a distinct `workerId` to every worker in a process group; the default is
+> only safe when there is one worker per host.
+
 The one case this doesn't cover on its own: a worker that dies and is *never*
 restarted with the same id (an ephemeral pod that comes back under a fresh
 name). Its in-flight list has no owner to reclaim it. If your deployment can do
