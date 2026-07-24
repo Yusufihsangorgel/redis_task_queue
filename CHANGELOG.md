@@ -1,3 +1,24 @@
+## 0.11.0
+
+Settles the class-modifier and export questions ahead of a 1.0.0 freeze. No
+behaviour changes.
+
+- Mark the six exported classes `final`: `QueueClient`, `Worker`, `Task`,
+  `TaskContext`, `DeadLetter` and `QueueStats`. None was designed to be
+  extended or implemented, and nothing in the package, its tests or its
+  examples subtypes any of them. Sealing them keeps the rest of 1.x additive:
+  the roadmap adds members to exactly these types, and every addition would
+  otherwise break anyone who had implemented them. Breaking only for code that
+  subclassed one, which was never a supported shape; mock a `QueueClient` or
+  `Worker` by wrapping it rather than implementing it.
+- Name both remaining exports explicitly. `client.dart` and `worker.dart` were
+  re-exported whole, so a symbol that became public in either would have joined
+  the API by accident. The exported set is unchanged.
+- Fix the delayed-set key in the README, which documented
+  `<prefix>:<queue>:delayed` while the real key is
+  `<prefix>:queue:<queue>:delayed`. Anyone monitoring Redis by the documented
+  pattern would have watched a key that does not exist.
+
 ## 0.10.1
 
 - `QueueClient` and `Worker` now reconnect after a dropped Redis connection

@@ -128,7 +128,7 @@ retries are exhausted, on the dead-letter list:
   still leads one sweep in every ten.
 - **Retries with exponential backoff.** A handler that throws is retried up to
   the task's `maxRetries`. Retries aren't immediate: the envelope goes into a
-  per-queue delayed sorted set (`<prefix>:<queue>:delayed`) scored with the time
+  per-queue delayed sorted set (`<prefix>:queue:<queue>:delayed`) scored with the time
   it becomes due. The wait grows `min(cap, base * 2^(retry-1))` — the first
   retry waits `backoffBase` (default 1s), each further one doubles up to
   `backoffCap` (default 60s) — plus a little jitter so a burst of failures

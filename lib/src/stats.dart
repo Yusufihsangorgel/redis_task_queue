@@ -5,7 +5,7 @@
 /// is scheduled or backing-off work not yet due, and [deadLetter] is work that
 /// gave up. A pending count that only grows means the workers are behind; a
 /// dead-letter count that grows means something is failing for good.
-class QueueStats {
+final class QueueStats {
   QueueStats({
     required this.pending,
     required this.delayed,

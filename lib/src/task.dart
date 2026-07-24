@@ -5,7 +5,7 @@ import 'dart:convert';
 /// A task has a [type] (which decides who handles it) and a JSON-serializable
 /// [payload]. The type/payload split is deliberate: the enqueuing side and the
 /// worker side only need to agree on a string and a shape, not share code.
-class Task {
+final class Task {
   Task(this.type, this.payload);
 
   /// The task type name. The worker routes to a handler by this string.
@@ -31,7 +31,7 @@ class Task {
 /// survivable. It is assigned once, at enqueue, and is the same on every
 /// attempt, so it is the key to write against when deciding whether the work
 /// has already been done.
-class TaskContext {
+final class TaskContext {
   const TaskContext({
     required this.id,
     required this.queue,
@@ -129,7 +129,7 @@ class Envelope {
 /// This is what [QueueClient.deadLetters] returns, the raw material for triage:
 /// see what died and why, then decide whether to [QueueClient.replayDeadLetter]
 /// it after fixing the cause, or drop it.
-class DeadLetter {
+final class DeadLetter {
   DeadLetter({
     required this.id,
     required this.task,

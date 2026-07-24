@@ -62,7 +62,7 @@ typedef TaskDeadLetterCallback = void Function(
 /// dead-letter list instead of looping forever. The same delayed set also
 /// holds tasks scheduled for a future time; the poll loop's due-mover promotes
 /// both once due.
-class Worker {
+final class Worker {
   Worker._(
     this._command,
     this._keys,

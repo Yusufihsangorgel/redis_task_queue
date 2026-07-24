@@ -12,7 +12,7 @@ import 'task.dart';
 /// scheduled task). A dropped connection doesn't end that lifetime either: the
 /// next call reconnects and retries once before giving up, so a Redis restart
 /// or failover doesn't permanently break a client that survives it.
-class QueueClient {
+final class QueueClient {
   QueueClient._(this._command, this._keys, this._host, this._port)
       : _idPrefix = _randomPrefix();
 
