@@ -1,3 +1,23 @@
+## 1.0.0
+
+The API is stable. No code changes since 0.12.0, which settled the last three
+freeze-blockers; this freezes the surface after re-verifying them against a live
+Redis.
+
+Verified by execution: two workers constructed with the same `workerId` in one
+isolate throw a `StateError` rather than silently stealing each other's
+in-flight tasks; `run()` after `close()` throws instead of starting a zombie
+loop; an unreachable server surfaces as `TaskQueueConnectionException`, and a
+server-side refusal as `TaskQueueServerException`, both under the sealed
+`TaskQueueException` with the original error on `.cause`. The full suite (47
+tests) passes against a real Redis, exercising weighted draining, the atomic
+Lua promote/retry/dead-letter scripts, crash recovery, and delayed scheduling.
+
+One limitation is by design and documented: a worker that dies and is never
+restarted under the same id leaves its in-flight list for a supervisor to
+requeue — recovery keys off a stable `workerId`, which is the price of not
+needing a heartbeat. Depends only on `package:redis` (4.x).
+
 ## 0.12.0
 
 Three breaking changes, all closing gaps that would have been frozen into
