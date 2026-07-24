@@ -1,3 +1,40 @@
+## 0.12.0
+
+Three breaking changes, all closing gaps that would have been frozen into
+1.0.0. Each is small to migrate.
+
+- **`workerId` is now required on `Worker.connect`.** It used to default to the
+  host name, which is silently wrong the moment a second worker starts on the
+  same machine: the two share an in-flight list, and each one's startup
+  recovery treats the other's *live* task as an orphan and requeues it, so the
+  task runs twice. Reproduced before the change (two workers, one task, both
+  ran it), and the default is what produced it. There is no safe default — the
+  id has to be stable across restarts *and* unique per worker — so the choice
+  now belongs to the caller, documented at the parameter. Passing the same id
+  to two live workers in one isolate throws a `StateError` instead of
+  corrupting the in-flight lists. To migrate, pass the value you were relying
+  on: `workerId: Platform.localHostname` restores the old behaviour exactly
+  (and is correct if you run one worker per host).
+- **Redis failures are now `TaskQueueException`s.** `enqueue`, `stats`,
+  `deadLetters`, `replayDeadLetter`, `purgeDeadLetters`, both `connect`s and
+  the worker loop used to surface whatever `package:redis` raised. That is not
+  a usable contract: `RedisError`, `RedisRuntimeError` and `TransactionError`
+  do not implement `Exception`, so `on Exception catch` missed them entirely,
+  and a dropped socket arrived as a `SocketException`, a `StateError`, or a
+  bare `String` depending on where it broke. They now become
+  `TaskQueueConnectionException` (Redis unreachable, after the existing
+  one-shot reconnect) or `TaskQueueServerException` (Redis answered with an
+  error), both under a sealed `TaskQueueException`, with the original kept on
+  `.cause`. A server-side refusal also no longer triggers a reconnect-and-retry
+  — the socket is alive, so the retry only collected the same answer.
+- **`Worker.close()` is terminal.** It awaits `stop()` first, so the loop is not
+  left polling a socket that is closing, releases the worker id, and is a no-op
+  when called twice. `run()` after `close()` throws a `StateError` rather than
+  starting a second loop on a dead connection.
+
+Ten tests cover the new behaviour, including the duplicate-execution scenario
+that motivated the first change.
+
 ## 0.11.0
 
 Settles the class-modifier and export questions ahead of a 1.0.0 freeze. No

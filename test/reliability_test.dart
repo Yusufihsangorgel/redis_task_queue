@@ -48,7 +48,8 @@ Future<bool> _pollUntil(
 void main() {
   setUp(_flush);
 
-  test('a running task is held on the in-flight list, not lost, until it finishes',
+  test(
+      'a running task is held on the in-flight list, not lost, until it finishes',
       () async {
     final client =
         await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
@@ -75,19 +76,18 @@ void main() {
     // and nowhere else. A crash at this instant would not lose it: the next run
     // of this worker finds it here.
     final inspect = await _connect();
-    final inflight =
-        await inspect.send_object(['LLEN', _inFlightKey()]) as int;
+    final inflight = await inspect.send_object(['LLEN', _inFlightKey()]) as int;
     final pending =
         await inspect.send_object(['LLEN', _pendingKey('default')]) as int;
     expect(inflight, 1,
         reason: 'the running task must be held on the in-flight list');
-    expect(pending, 0,
-        reason: 'it must be off the pending list while it runs');
+    expect(pending, 0, reason: 'it must be off the pending list while it runs');
 
     // Once it finishes, the in-flight list drains.
     release.complete();
     final drained = await _pollUntil(
-      () async => (await inspect.send_object(['LLEN', _inFlightKey()]) as int) == 0,
+      () async =>
+          (await inspect.send_object(['LLEN', _inFlightKey()]) as int) == 0,
     );
     expect(drained, isTrue,
         reason: 'a finished task must leave the in-flight list');
@@ -128,7 +128,8 @@ void main() {
       workerId: _workerId,
     );
     final ran = Completer<int>();
-    worker.handle('resume', (task, _) => ran.complete(task.payload['n'] as int));
+    worker.handle(
+        'resume', (task, _) => ran.complete(task.payload['n'] as int));
     final loop = worker.run();
 
     expect(await ran.future.timeout(const Duration(seconds: 5)), 7,
@@ -137,7 +138,8 @@ void main() {
     // The in-flight list is clean once the recovered task completes.
     final inspect = await _connect();
     final drained = await _pollUntil(
-      () async => (await inspect.send_object(['LLEN', _inFlightKey()]) as int) == 0,
+      () async =>
+          (await inspect.send_object(['LLEN', _inFlightKey()]) as int) == 0,
     );
     expect(drained, isTrue);
 
@@ -175,8 +177,7 @@ void main() {
     // Give recovery + a poll cycle time to run, then confirm the peer's task is
     // still exactly where it was.
     await Future<void>.delayed(const Duration(milliseconds: 500));
-    final stillThere =
-        await seed.send_object(['LLEN', peerKey]) as int;
+    final stillThere = await seed.send_object(['LLEN', peerKey]) as int;
     expect(stillThere, 1,
         reason: "a peer worker's in-flight task must not be recovered");
 

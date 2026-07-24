@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:redis/redis.dart';
 
+import 'exceptions.dart';
 import 'keys.dart';
 import 'task.dart';
 
@@ -69,7 +69,8 @@ final class Worker {
     this._queues,
     this._workerId,
     this._host,
-    this._port, {
+    this._port,
+    this._idClaim, {
     required Duration backoffBase,
     required Duration backoffCap,
     required double backoffJitter,
@@ -80,6 +81,13 @@ final class Worker {
         _backoffJitter = backoffJitter,
         _onError = onError,
         _onDeadLetter = onDeadLetter;
+
+  /// Worker ids currently claimed in this isolate, as `host:port|prefix|id`.
+  /// Guards against two live workers sharing an in-flight list; see [connect].
+  static final _liveIds = <String>{};
+
+  /// This worker's entry in [_liveIds], released by [close].
+  final String _idClaim;
 
   Command _command;
   final Keys _keys;
@@ -185,16 +193,31 @@ return 0
   /// the worker's observability seam: without them a handler exception is
   /// swallowed silently, which is rarely what a production queue wants.
   ///
-  /// [workerId] names this worker's in-flight list. A task is claimed by
-  /// atomically moving it there and removed once it finishes, so a worker that
-  /// dies mid-task leaves the envelope on the in-flight list rather than losing
-  /// it; on its next [run] a worker requeues everything left on its own
-  /// in-flight list. For that recovery to fire, a restarted worker must reuse
-  /// the same id, so it defaults to the host name and should be set to a value
-  /// that is stable across restarts (a pod or service name). Two workers must
-  /// never share an id. Delivery is therefore at-least-once: a task can run
-  /// again after a crash, so handlers must be idempotent.
+  /// [workerId] names this worker's in-flight list, and has to satisfy two
+  /// properties at once:
+  ///
+  /// * **Stable across restarts.** A task is claimed by atomically moving it to
+  ///   the in-flight list and removed once it finishes, so a worker that dies
+  ///   mid-task leaves the envelope there rather than losing it; on its next
+  ///   [run] a worker requeues whatever is left on its *own* in-flight list.
+  ///   An id that changes every start (a pid, a fresh UUID) strands those
+  ///   envelopes on a list nobody reads again, which loses the tasks.
+  /// * **Unique per worker.** Recovery cannot tell a dead worker's leftovers
+  ///   from a live worker's current task. Two workers sharing an id will each
+  ///   requeue the other's in-flight work at startup and run it a second time.
+  ///
+  /// A pod name, a service name, or a host name plus a slot number all satisfy
+  /// both. There is deliberately no default: the obvious one (the host name)
+  /// is silently wrong the moment a second worker starts on the same machine,
+  /// and picking it for you would hide that. Passing the same id to two
+  /// workers in one isolate throws [StateError] rather than corrupting the
+  /// in-flight lists; across processes it cannot be detected, so choose ids
+  /// that cannot collide.
+  ///
+  /// Delivery is at-least-once regardless: a task can run again after a crash,
+  /// so handlers must be idempotent.
   static Future<Worker> connect({
+    required String workerId,
     String host = 'localhost',
     int port = 6379,
     String prefix = 'rtq',
@@ -202,18 +225,39 @@ return 0
     Duration backoffBase = const Duration(seconds: 1),
     Duration backoffCap = const Duration(seconds: 60),
     double backoffJitter = 0.1,
-    String? workerId,
     TaskErrorCallback? onError,
     TaskDeadLetterCallback? onDeadLetter,
   }) async {
-    final command = await _dial(host, port);
+    if (workerId.isEmpty) {
+      throw ArgumentError.value(workerId, 'workerId', 'must not be empty');
+    }
+    // Two live workers on one in-flight list steal each other's tasks. Within
+    // an isolate that is cheap to catch, so catch it instead of letting the
+    // duplicate run silently.
+    final claim = '$host:$port|$prefix|$workerId';
+    if (!_liveIds.add(claim)) {
+      throw StateError(
+        'workerId "$workerId" is already in use by another Worker on '
+        '$host:$port (prefix "$prefix"). Two workers sharing an id requeue '
+        "each other's in-flight tasks and run them twice; give each worker a "
+        'distinct id.',
+      );
+    }
+    final Command command;
+    try {
+      command = await _dial(host, port);
+    } on Object catch (e, s) {
+      _liveIds.remove(claim);
+      Error.throwWithStackTrace(wrapRedisError(e, 'connect'), s);
+    }
     return Worker._(
       command,
       Keys(prefix),
       queues,
-      workerId ?? Platform.localHostname,
+      workerId,
       host,
       port,
+      claim,
       backoffBase: backoffBase,
       backoffCap: backoffCap,
       backoffJitter: backoffJitter,
@@ -243,9 +287,18 @@ return 0
   Future<dynamic> _send(List<Object> command) async {
     try {
       return await _command.send_object(command);
+    } on RedisError catch (e, s) {
+      // A server-side refusal, not a dead socket: reconnecting would only get
+      // the same answer back.
+      Error.throwWithStackTrace(wrapRedisError(e, command.first as String), s);
     } catch (_) {
-      await _reconnect();
-      return await _command.send_object(command);
+      try {
+        await _reconnect();
+        return await _command.send_object(command);
+      } on Object catch (e, s) {
+        Error.throwWithStackTrace(
+            wrapRedisError(e, command.first as String), s);
+      }
     }
   }
 
@@ -274,6 +327,11 @@ return 0
   /// recovery again first in case anything was in flight when the connection
   /// dropped. What ends the loop is [stop].
   Future<void> run() async {
+    if (_closed) {
+      throw StateError(
+        'this Worker has been closed; construct a new one to run again',
+      );
+    }
     _running = true;
     _drained = Completer<void>();
     try {
@@ -560,5 +618,21 @@ return 0
     return drained.future;
   }
 
-  Future<void> close() => _command.get_connection().close();
+  /// Shuts the worker down for good: stops the loop, releases the worker id,
+  /// and closes the connection.
+  ///
+  /// This awaits [stop], so a task in progress finishes first and the loop is
+  /// not left polling a socket that is about to close. Calling it twice is a
+  /// no-op. A closed worker cannot be restarted — [run] throws [StateError]
+  /// afterwards — because its connection is gone and its id has been released
+  /// to another worker in this isolate.
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    await stop();
+    _liveIds.remove(_idClaim);
+    await _command.get_connection().close();
+  }
+
+  bool _closed = false;
 }

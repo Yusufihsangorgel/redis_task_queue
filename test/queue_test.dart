@@ -54,6 +54,7 @@ void main() {
     final client =
         await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
     final worker = await Worker.connect(
+      workerId: 'w1',
       host: _host,
       port: _port,
       prefix: _prefix,
@@ -61,7 +62,8 @@ void main() {
     );
 
     final ran = Completer<String>();
-    worker.handle('greet', (task, _) => ran.complete(task.payload['name'] as String));
+    worker.handle(
+        'greet', (task, _) => ran.complete(task.payload['name'] as String));
     final loop = worker.run();
 
     await client.enqueue(Task('greet', {'name': 'jane'}));
@@ -80,6 +82,7 @@ void main() {
     // A long base backoff so the task stays in the delayed set long enough to
     // observe it there (the mover won't promote it for a minute).
     final worker = await Worker.connect(
+      workerId: 'w2',
       host: _host,
       port: _port,
       prefix: _prefix,
@@ -100,7 +103,8 @@ void main() {
       final n = await inspect.send_object(['ZCARD', _delayedKey('default')]);
       return (n as int) == 1;
     });
-    expect(landed, isTrue, reason: 'failed task should land in the delayed set');
+    expect(landed, isTrue,
+        reason: 'failed task should land in the delayed set');
 
     // It must NOT be back on the pending list yet.
     final pending =
@@ -131,6 +135,7 @@ void main() {
         await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
     // Small base so the backoff elapses quickly and the test stays fast.
     final worker = await Worker.connect(
+      workerId: 'w3',
       host: _host,
       port: _port,
       prefix: _prefix,
@@ -167,6 +172,7 @@ void main() {
         await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
     // Small base keeps the two backed-off retries fast and deterministic.
     final worker = await Worker.connect(
+      workerId: 'w4',
       host: _host,
       port: _port,
       prefix: _prefix,
@@ -195,7 +201,8 @@ void main() {
       timeout: const Duration(seconds: 10),
     );
 
-    expect(dead, isNotNull, reason: 'envelope should reach the dead-letter list');
+    expect(dead, isNotNull,
+        reason: 'envelope should reach the dead-letter list');
     expect(attempts, greaterThanOrEqualTo(3)); // initial + 2 retries
 
     worker.stop();
@@ -219,7 +226,8 @@ void main() {
     final inspect = await _connect();
     final delayed =
         await inspect.send_object(['ZCARD', _delayedKey('default')]) as int;
-    expect(delayed, 1, reason: 'a scheduled task should sit in the delayed set');
+    expect(delayed, 1,
+        reason: 'a scheduled task should sit in the delayed set');
 
     final pending =
         await inspect.send_object(['LLEN', _pendingKey('default')]) as int;
@@ -244,6 +252,7 @@ void main() {
     final client =
         await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
     final worker = await Worker.connect(
+      workerId: 'w5',
       host: _host,
       port: _port,
       prefix: _prefix,
@@ -281,6 +290,7 @@ void main() {
     final client =
         await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
     final worker = await Worker.connect(
+      workerId: 'w6',
       host: _host,
       port: _port,
       prefix: _prefix,
@@ -315,6 +325,7 @@ void main() {
     String? deadLetteredId;
     // Small base keeps the single backed-off retry fast and deterministic.
     final worker = await Worker.connect(
+      workerId: 'w7',
       host: _host,
       port: _port,
       prefix: _prefix,
@@ -417,6 +428,7 @@ void main() {
     // onError itself throws; the task must still reach the dead-letter list,
     // proving the callback is isolated from the processing path.
     final worker = await Worker.connect(
+      workerId: 'w8',
       host: _host,
       port: _port,
       prefix: _prefix,

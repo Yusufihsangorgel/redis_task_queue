@@ -48,7 +48,8 @@ Future<void> main(List<String> args) async {
 
   print('2. the task is on no pending list, so nothing will poll it up,');
   print('   and no live worker holds it. It is parked on the in-flight list');
-  print('   that belongs to "$_workerId", waiting for that worker to return.\n');
+  print(
+      '   that belongs to "$_workerId", waiting for that worker to return.\n');
 
   print('3. a worker starts again under the same id');
   final ran = Completer<void>();

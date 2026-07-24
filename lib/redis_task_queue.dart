@@ -5,6 +5,11 @@
 /// retries, a dead-letter list, and weighted queues.
 library;
 
+export 'src/exceptions.dart'
+    show
+        TaskQueueException,
+        TaskQueueConnectionException,
+        TaskQueueServerException;
 export 'src/client.dart' show QueueClient;
 export 'src/task.dart' show Task, TaskContext, DeadLetter;
 export 'src/stats.dart' show QueueStats;

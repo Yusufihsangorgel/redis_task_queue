@@ -83,6 +83,9 @@ on the next mover pass.
 
 ```dart
 final worker = await Worker.connect(
+  // Required. Stable across this worker's restarts, and different from every
+  // other worker's — see "Recovery and worker ids" below.
+  workerId: Platform.environment['POD_NAME'] ?? 'worker-1',
   queues: {'critical': 6, 'default': 3, 'low': 1},
   // Optional — these are the defaults. The first retry waits backoffBase,
   // each further retry doubles it up to backoffCap, plus a bit of jitter.
@@ -209,24 +212,52 @@ reports a queue that has no keys yet as zero rather than omitting it.
 
 ## Recovery and worker ids
 
-In-flight recovery keys off `workerId` (default: the host name). A restarted
-worker reclaims tasks only from its **own** in-flight list, never a live peer's,
-so give each worker a stable id that survives a restart — a pod, service, or
-host name. In Kubernetes a `StatefulSet` pod name or an explicit `WORKER_ID`
-env works well.
+In-flight recovery keys off `workerId`, which is required and has to be two
+things at once:
 
-> **Run two workers on one host and you must give them distinct ids.** The
-> default id is the bare host name, so two workers started on the same machine
-> share it — and on startup each one's recovery treats the other's live
-> in-flight tasks as its own orphans and reclaims them, running them twice.
-> Pass a distinct `workerId` to every worker in a process group; the default is
-> only safe when there is one worker per host.
+- **Stable across restarts.** A restarted worker reclaims whatever is left on
+  its *own* in-flight list. An id that changes every start — a pid, a fresh
+  UUID — strands those envelopes on a list nobody reads again, losing the tasks.
+- **Different from every other worker's.** Recovery cannot tell a dead worker's
+  leftovers from a live worker's current task, so two workers sharing an id each
+  requeue the other's in-flight work at startup and run it a second time.
+
+A `StatefulSet` pod name, a service name, or a host name plus a slot number all
+satisfy both. There is deliberately no default: the obvious one (the host name)
+is silently wrong the moment a second worker starts on the same machine, and
+picking it for you would hide that. Passing the same id to two workers in one
+isolate throws a `StateError`; across processes nothing can detect it, so choose
+ids that cannot collide.
 
 The one case this doesn't cover on its own: a worker that dies and is *never*
 restarted with the same id (an ephemeral pod that comes back under a fresh
 name). Its in-flight list has no owner to reclaim it. If your deployment can do
 that, run workers under stable ids, or have a supervisor requeue any
 `<prefix>:inflight:*` list belonging to an id that is no longer running.
+
+## Errors
+
+Everything this package throws for a Redis failure is a `TaskQueueException`,
+so one catch clause covers the lot:
+
+```dart
+try {
+  await client.enqueue(Task('email:welcome', {'to': address}));
+} on TaskQueueConnectionException {
+  // Redis is unreachable — the call already retried once on a fresh socket.
+  // Shed the request or buffer it; do not assume the task was queued.
+} on TaskQueueServerException {
+  // Redis answered with an error. Sending the same command again will get the
+  // same refusal, so this is a bug or an operational limit, not a blip.
+}
+```
+
+It is `sealed`, so those two subtypes are the whole set and a `switch` over
+them stays exhaustive. The wrapper exists because the raw errors are not usable
+as a contract: `package:redis` raises `RedisError`, `RedisRuntimeError` and
+`TransactionError`, none of which implement `Exception` (so `on Exception catch`
+misses them), and a dropped socket arrives variously as a `SocketException`, a
+`StateError`, or a bare `String`. The original is kept on `.cause` for logging.
 
 ## What this version keeps small (on purpose)
 

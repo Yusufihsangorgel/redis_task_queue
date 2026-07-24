@@ -7,7 +7,9 @@ Future<void> main(List<String> args) async {
   final mode = args.isEmpty ? 'enqueue' : args.first;
 
   if (mode == 'worker') {
-    final worker = await Worker.connect();
+    final worker = await Worker.connect(
+      workerId: 'example-worker',
+    );
     worker.handle('email:welcome', (task, context) async {
       // Real work goes here. Throw to trigger a retry; return to mark it done.
       //

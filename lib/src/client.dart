@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:redis/redis.dart';
 
+import 'exceptions.dart';
 import 'keys.dart';
 import 'schedule.dart';
 import 'stats.dart';
@@ -36,12 +37,19 @@ final class QueueClient {
 
   /// Connects to Redis and returns a ready client. [prefix] namespaces all
   /// keys so the queue can share a Redis instance with other data.
+  ///
+  /// Throws [TaskQueueConnectionException] if Redis cannot be reached.
   static Future<QueueClient> connect({
     String host = 'localhost',
     int port = 6379,
     String prefix = 'rtq',
   }) async {
-    final command = await _dial(host, port);
+    final Command command;
+    try {
+      command = await _dial(host, port);
+    } on Object catch (e, s) {
+      Error.throwWithStackTrace(wrapRedisError(e, 'connect'), s);
+    }
     return QueueClient._(command, Keys(prefix), host, port);
   }
 
@@ -60,12 +68,25 @@ final class QueueClient {
   /// dead": open a fresh connection and retry the same command once. A second
   /// failure after that means Redis is actually down, not just blipped, so it
   /// is rethrown rather than retried forever.
+  ///
+  /// A second failure is reported as a [TaskQueueException] rather than
+  /// whatever `package:redis` raised, so callers have one type to catch; see
+  /// [TaskQueueException] for why the raw errors are not usable.
   Future<dynamic> _send(List<Object> command) async {
     try {
       return await _command.send_object(command);
+    } on RedisError catch (e, s) {
+      // The server answered, so the socket is alive; reconnecting and sending
+      // the same command again would only collect the same refusal.
+      Error.throwWithStackTrace(wrapRedisError(e, command.first as String), s);
     } catch (_) {
-      _command = await _dial(_host, _port);
-      return await _command.send_object(command);
+      try {
+        _command = await _dial(_host, _port);
+        return await _command.send_object(command);
+      } on Object catch (e, s) {
+        Error.throwWithStackTrace(
+            wrapRedisError(e, command.first as String), s);
+      }
     }
   }
 

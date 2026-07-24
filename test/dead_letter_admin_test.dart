@@ -23,6 +23,7 @@ Future<void> _flush() async {
 }
 
 Future<Worker> _worker({int weight = 1}) => Worker.connect(
+      workerId: 'w1',
       host: _host,
       port: _port,
       prefix: _prefix,
@@ -94,8 +95,8 @@ void main() {
     final loop = worker.run();
 
     final id = await client.enqueue(Task('flaky', {}), maxRetries: 1);
-    await _pollUntil(() async =>
-        (await client.deadLetters()).any((d) => d.id == id));
+    await _pollUntil(
+        () async => (await client.deadLetters()).any((d) => d.id == id));
 
     // Replay it. It should leave the dead list and run again to success.
     expect(await client.replayDeadLetter(id), isTrue);

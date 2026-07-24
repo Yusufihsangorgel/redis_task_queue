@@ -24,6 +24,7 @@ void main() {
     final client =
         await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
     final worker = await Worker.connect(
+      workerId: 'w1',
       host: _host,
       port: _port,
       prefix: _prefix,
@@ -51,6 +52,7 @@ void main() {
 
   test('stop() before run() returns an already-completed future', () async {
     final worker = await Worker.connect(
+      workerId: 'w2',
       host: _host,
       port: _port,
       prefix: _prefix,
@@ -62,6 +64,7 @@ void main() {
 
   test('stop() is safe to call twice', () async {
     final worker = await Worker.connect(
+      workerId: 'w3',
       host: _host,
       port: _port,
       prefix: _prefix,

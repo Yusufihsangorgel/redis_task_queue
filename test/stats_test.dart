@@ -90,6 +90,7 @@ void main() {
     final holding = Completer<void>();
     final release = Completer<void>();
     final worker = await Worker.connect(
+      workerId: 'w1',
       host: _host,
       port: _port,
       prefix: _prefix,

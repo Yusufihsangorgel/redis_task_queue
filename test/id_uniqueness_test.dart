@@ -71,8 +71,7 @@ void main() {
       ];
       expect(ids.toSet(), hasLength(100));
       // Same client, same prefix, so the counter suffix rises monotonically.
-      final suffixes =
-          ids.map((id) => int.parse(id.split('-').last)).toList();
+      final suffixes = ids.map((id) => int.parse(id.split('-').last)).toList();
       expect(suffixes, [for (var i = 1; i <= 100; i++) i]);
     } finally {
       await client.close();
