@@ -280,6 +280,20 @@ dart run example/redis_task_queue_example.dart worker
 dart run example/redis_task_queue_example.dart enqueue
 ```
 
+## Running the tests
+
+The tests talk to a real Redis rather than a fake, so they need one listening on
+port 6399. That is what CI does: it runs a `redis:7` container with the
+container's 6379 published on 6399, then `dart test` with no arguments.
+
+```bash
+docker run --rm -p 6399:6379 redis:7
+dart test
+```
+
+The port is deliberately not 6379 so a test run cannot touch a Redis you are
+already using. The tests create and delete keys under their own prefixes.
+
 ## License
 
 MIT © Yusuf İhsan Görgel

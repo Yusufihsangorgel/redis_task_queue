@@ -1,3 +1,9 @@
+## 1.0.1
+
+- Document how to run the tests. They talk to a real Redis on port 6399, which
+  the readme never said, so a clone-and-`dart test` failed with a connection
+  error and no explanation. Readme only; no code change.
+
 ## 1.0.0
 
 The API is stable. No code changes since 0.12.0, which settled the last three
