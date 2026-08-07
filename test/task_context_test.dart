@@ -4,12 +4,8 @@ import 'package:redis/redis.dart';
 import 'package:redis_task_queue/redis_task_queue.dart';
 import 'package:test/test.dart';
 
-/// Needs a Redis instance. Point REDIS_PORT at one (the CI/dev default is 6399
-/// so it won't clobber a local 6379).
-const _host = 'localhost';
-final _port = int.parse(
-  String.fromEnvironment('REDIS_PORT', defaultValue: '6399'),
-);
+import '_redis.dart';
+
 const _prefix = 'rtq_context_test';
 const _workerId = 'context-test-worker';
 
@@ -17,7 +13,7 @@ const _workerId = 'context-test-worker';
 // so a blanket FLUSHDB would wipe another suite mid-test.
 Future<void> _flush() async {
   final conn = RedisConnection();
-  final cmd = await conn.connect(_host, _port);
+  final cmd = await conn.connect(redisHost, redisPort);
   final keys = await cmd.send_object(['KEYS', '$_prefix:*']) as List;
   if (keys.isNotEmpty) {
     await cmd.send_object(['DEL', ...keys.cast<String>()]);
@@ -26,8 +22,8 @@ Future<void> _flush() async {
 }
 
 Future<Worker> _worker() => Worker.connect(
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
       workerId: _workerId,
@@ -37,12 +33,14 @@ Future<Worker> _worker() => Worker.connect(
     );
 
 void main() {
+  requireRedis();
+
   setUp(_flush);
 
   test('the handler sees the id enqueue returned, unchanged across retries',
       () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final worker = await _worker();
     final seen = <TaskContext>[];
     final done = Completer<void>();
@@ -71,8 +69,8 @@ void main() {
   });
 
   test('maxAttempts is the first run plus its retries', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final worker = await _worker();
     final seen = Completer<TaskContext>();
 
@@ -94,8 +92,8 @@ void main() {
 
   test('isLastAttempt is true on exactly the run whose failure dead-letters',
       () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final worker = await _worker();
     final flags = <bool>[];
     final deadLettered = Completer<void>();
@@ -114,7 +112,7 @@ void main() {
     await client.enqueue(Task('doomed', {}), maxRetries: 2);
 
     final conn = RedisConnection();
-    final cmd = await conn.connect(_host, _port);
+    final cmd = await conn.connect(redisHost, redisPort);
     final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (DateTime.now().isBefore(deadline)) {
       final len = await cmd.send_object(['LLEN', '$_prefix:dead']) as int;

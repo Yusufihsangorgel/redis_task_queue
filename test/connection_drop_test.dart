@@ -5,18 +5,14 @@ import 'package:redis/redis.dart';
 import 'package:redis_task_queue/redis_task_queue.dart';
 import 'package:test/test.dart';
 
-/// These tests need a Redis instance. Point REDIS_PORT at one (the CI/dev
-/// default is 6399 so it won't clobber a local 6379).
-const _host = 'localhost';
-final _port = int.parse(
-  String.fromEnvironment('REDIS_PORT', defaultValue: '6399'),
-);
+import '_redis.dart';
+
 const _prefix = 'rtq_connection_drop_test';
 const _workerId = 'test-worker';
 
 Future<void> _flush() async {
   final conn = RedisConnection();
-  final cmd = await conn.connect(_host, _port);
+  final cmd = await conn.connect(redisHost, redisPort);
   final keys = await cmd.send_object(['KEYS', '$_prefix:*']) as List;
   if (keys.isNotEmpty) {
     await cmd.send_object(['DEL', ...keys.cast<String>()]);
@@ -69,7 +65,7 @@ class _Proxy {
   Future<void> _accept(Socket client) async {
     Socket upstream;
     try {
-      upstream = await Socket.connect(_host, _port);
+      upstream = await Socket.connect(redisHost, redisPort);
     } catch (_) {
       client.destroy();
       return;
@@ -104,6 +100,8 @@ class _Proxy {
 }
 
 void main() {
+  requireRedis();
+
   setUp(_flush);
 
   test('QueueClient.enqueue recovers after its connection is severed',

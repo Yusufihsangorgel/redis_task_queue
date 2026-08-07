@@ -4,12 +4,8 @@ import 'package:redis/redis.dart';
 import 'package:redis_task_queue/redis_task_queue.dart';
 import 'package:test/test.dart';
 
-/// These tests need a Redis instance. Point REDIS_PORT at one (the CI/dev
-/// default is 6399 so it won't clobber a local 6379).
-const _host = 'localhost';
-final _port = int.parse(
-  String.fromEnvironment('REDIS_PORT', defaultValue: '6399'),
-);
+import '_redis.dart';
+
 const _prefix = 'rtq_test';
 
 // Redis key layout the tests inspect directly, mirroring lib/src/keys.dart.
@@ -19,7 +15,7 @@ const _deadKey = '$_prefix:dead';
 
 Future<Command> _connect() async {
   final conn = RedisConnection();
-  return conn.connect(_host, _port);
+  return conn.connect(redisHost, redisPort);
 }
 
 // Delete only this suite's keys, not the whole DB: test files run concurrently
@@ -48,15 +44,17 @@ Future<bool> _pollUntil(
 }
 
 void main() {
+  requireRedis();
+
   setUp(_flush);
 
   test('a valid task runs in the worker', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final worker = await Worker.connect(
       workerId: 'w1',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
     );
@@ -77,14 +75,14 @@ void main() {
 
   test('a failed task waits in the delayed set, not pending, before retry',
       () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     // A long base backoff so the task stays in the delayed set long enough to
     // observe it there (the mover won't promote it for a minute).
     final worker = await Worker.connect(
       workerId: 'w2',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
       backoffBase: const Duration(seconds: 60),
@@ -131,13 +129,13 @@ void main() {
 
   test('the due-mover promotes a delayed task and the worker reprocesses it',
       () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     // Small base so the backoff elapses quickly and the test stays fast.
     final worker = await Worker.connect(
       workerId: 'w3',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
       backoffBase: const Duration(milliseconds: 50),
@@ -168,13 +166,13 @@ void main() {
 
   test('a failing task lands in the dead-letter list after maxRetries',
       () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     // Small base keeps the two backed-off retries fast and deterministic.
     final worker = await Worker.connect(
       workerId: 'w4',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
       backoffBase: const Duration(milliseconds: 30),
@@ -213,8 +211,8 @@ void main() {
   });
 
   test('a scheduled task waits in the delayed set, not pending', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
 
     // Far enough out that nothing could promote it during the test. No worker
     // is needed: enqueue alone must place it correctly.
@@ -249,12 +247,12 @@ void main() {
   });
 
   test('a scheduled task runs once its time comes, not before', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final worker = await Worker.connect(
       workerId: 'w5',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
     );
@@ -287,12 +285,12 @@ void main() {
   });
 
   test('a processAt in the past runs promptly', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final worker = await Worker.connect(
       workerId: 'w6',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
     );
@@ -318,16 +316,16 @@ void main() {
 
   test('onError fires on each failure and onDeadLetter fires terminally',
       () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final errors = <({int attempt, bool willRetry, Object error, String id})>[];
     final deadLettered = Completer<Task>();
     String? deadLetteredId;
     // Small base keeps the single backed-off retry fast and deterministic.
     final worker = await Worker.connect(
       workerId: 'w7',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
       backoffBase: const Duration(milliseconds: 30),
@@ -374,14 +372,14 @@ void main() {
 
   test('the worker gives each queue first look in proportion to its weight',
       () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     // Weights 3:2:1. Enqueue exactly the weight count to each queue, all up
     // front, so one full weighted cycle drains them and the lead order is
     // deterministic.
     final worker = await Worker.connect(
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'a': 3, 'b': 2, 'c': 1},
       workerId: 'fairness-worker',
@@ -423,14 +421,14 @@ void main() {
   });
 
   test('a throwing observer callback does not break the worker', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     // onError itself throws; the task must still reach the dead-letter list,
     // proving the callback is isolated from the processing path.
     final worker = await Worker.connect(
       workerId: 'w8',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
       onError: (_, __, ___, ____) => throw StateError('observer is buggy'),

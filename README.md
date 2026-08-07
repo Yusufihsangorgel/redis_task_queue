@@ -292,7 +292,20 @@ dart test
 ```
 
 The port is deliberately not 6379 so a test run cannot touch a Redis you are
-already using. The tests create and delete keys under their own prefixes.
+already using. The tests create and delete keys under their own prefixes. To
+point them somewhere else, set `REDIS_PORT`:
+
+```bash
+REDIS_PORT=6499 dart test
+```
+
+With nothing listening the suite stops once and says so, rather than handing
+back a `SocketException` per test:
+
+```
+Bad state: These tests need a Redis listening on localhost:6399.
+  docker run --rm -p 6399:6379 redis:7
+```
 
 ## License
 

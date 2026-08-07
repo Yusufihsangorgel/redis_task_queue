@@ -2,23 +2,23 @@ import 'package:redis/redis.dart';
 import 'package:redis_task_queue/redis_task_queue.dart';
 import 'package:test/test.dart';
 
-const _host = 'localhost';
-final _port = int.parse(
-  String.fromEnvironment('REDIS_PORT', defaultValue: '6399'),
-);
+import '_redis.dart';
+
 const _prefix = 'rtq_exceptions_test';
 
 // A port nothing listens on, so dialling it fails immediately.
 const _deadPort = 6301;
 
 Future<void> _flush() async {
-  final cmd = await RedisConnection().connect(_host, _port);
+  final cmd = await RedisConnection().connect(redisHost, redisPort);
   final keys = await cmd.send_object(['KEYS', '$_prefix:*']) as List;
   if (keys.isNotEmpty) await cmd.send_object(['DEL', ...keys.cast<String>()]);
   await cmd.get_connection().close();
 }
 
 void main() {
+  requireRedis();
+
   setUp(_flush);
   tearDown(_flush);
 
@@ -36,11 +36,11 @@ void main() {
   // A pending queue is a list. Making the key hold a plain string first means
   // the LPUSH behind enqueue gets WRONGTYPE back from the server.
   test('a server refusal reports a server exception', () async {
-    final raw = await RedisConnection().connect(_host, _port);
+    final raw = await RedisConnection().connect(redisHost, redisPort);
     await raw.send_object(['SET', '$_prefix:queue:default', 'not-a-list']);
     await raw.get_connection().close();
 
-    final client = await QueueClient.connect(port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(port: redisPort, prefix: _prefix);
     addTearDown(client.close);
 
     await expectLater(

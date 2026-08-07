@@ -5,12 +5,8 @@ import 'package:redis/redis.dart';
 import 'package:redis_task_queue/redis_task_queue.dart';
 import 'package:test/test.dart';
 
-/// These tests need a Redis instance. Point REDIS_PORT at one (the CI/dev
-/// default is 6399 so it won't clobber a local 6379).
-const _host = 'localhost';
-final _port = int.parse(
-  String.fromEnvironment('REDIS_PORT', defaultValue: '6399'),
-);
+import '_redis.dart';
+
 const _prefix = 'rtq_reliability_test';
 const _workerId = 'test-worker';
 
@@ -19,7 +15,7 @@ String _pendingKey(String queue) => '$_prefix:queue:$queue';
 
 Future<Command> _connect() async {
   final conn = RedisConnection();
-  return conn.connect(_host, _port);
+  return conn.connect(redisHost, redisPort);
 }
 
 // Delete only this suite's keys, not the whole DB: test files run concurrently
@@ -46,16 +42,18 @@ Future<bool> _pollUntil(
 }
 
 void main() {
+  requireRedis();
+
   setUp(_flush);
 
   test(
       'a running task is held on the in-flight list, not lost, until it finishes',
       () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final worker = await Worker.connect(
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
       workerId: _workerId,
@@ -121,8 +119,8 @@ void main() {
     // A fresh worker with the same id starts up; it must requeue and run the
     // orphan rather than leave it stranded.
     final worker = await Worker.connect(
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
       workerId: _workerId,
@@ -165,8 +163,8 @@ void main() {
     await seed.send_object(['LPUSH', peerKey, peerEnvelope]);
 
     final worker = await Worker.connect(
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
       workerId: _workerId,

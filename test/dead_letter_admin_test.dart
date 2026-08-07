@@ -4,17 +4,13 @@ import 'package:redis/redis.dart';
 import 'package:redis_task_queue/redis_task_queue.dart';
 import 'package:test/test.dart';
 
-/// Needs a Redis instance. Point REDIS_PORT at one (the CI/dev default is 6399
-/// so it won't clobber a local 6379).
-const _host = 'localhost';
-final _port = int.parse(
-  String.fromEnvironment('REDIS_PORT', defaultValue: '6399'),
-);
+import '_redis.dart';
+
 const _prefix = 'rtq_dla_test';
 
 Future<void> _flush() async {
   final conn = RedisConnection();
-  final cmd = await conn.connect(_host, _port);
+  final cmd = await conn.connect(redisHost, redisPort);
   final keys = await cmd.send_object(['KEYS', '$_prefix:*']) as List;
   if (keys.isNotEmpty) {
     await cmd.send_object(['DEL', ...keys.cast<String>()]);
@@ -24,8 +20,8 @@ Future<void> _flush() async {
 
 Future<Worker> _worker({int weight = 1}) => Worker.connect(
       workerId: 'w1',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': weight},
       backoffBase: const Duration(milliseconds: 5),
@@ -45,11 +41,13 @@ Future<bool> _pollUntil(
 }
 
 void main() {
+  requireRedis();
+
   setUp(_flush);
 
   test('a dead-lettered task is inspectable, with its error', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final worker = await _worker();
     worker.handle('doomed', (task, context) {
       throw StateError('upstream is on fire');
@@ -80,8 +78,8 @@ void main() {
   });
 
   test('replaying re-runs the task and clears it from the dead list', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     var attempts = 0;
     final succeeded = Completer<void>();
     final worker = await _worker();
@@ -115,15 +113,15 @@ void main() {
   });
 
   test('replaying an unknown id returns false', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     expect(await client.replayDeadLetter('no-such-id'), isFalse);
     await client.close();
   });
 
   test('purge empties the list and reports the count', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final worker = await _worker();
     worker.handle('boom', (task, context) => throw StateError('always'));
     final loop = worker.run();

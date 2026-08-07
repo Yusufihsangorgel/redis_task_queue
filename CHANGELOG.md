@@ -1,3 +1,25 @@
+## 1.0.2
+
+- **Make `REDIS_PORT` work.** Ten test files carried the line "Point
+  REDIS_PORT at one", and it did nothing: the port came from
+  `String.fromEnvironment`, which reads a compile-time `--define`, not the
+  process environment. Measured — `REDIS_PORT=7777 dart run` printed `6399`,
+  while `dart run --define=REDIS_PORT=7777` printed `7777`. The port is now
+  read from the environment first and falls back to the define, so both
+  spellings work and the documented one is the one that was already written
+  down.
+- **Say what is wrong when Redis is not running.** The suite used to hand back
+  a `SocketException: Connection refused` for every test that touched it —
+  more than twenty lines of stack, none of which mention that a container
+  needs starting. A single `setUpAll` now probes the port and stops with the
+  command instead. Same run, before and after: 20+ socket exceptions to 0.
+- The ten Redis-backed files share `test/_redis.dart` rather than each
+  declaring its own host and port. `schedule_test.dart` is untouched; its
+  scoring math takes `now` as a parameter and needs no server.
+- `lints` moves from 5 to 6. Nothing new fired.
+
+No library code changed in this release.
+
 ## 1.0.1
 
 - Document how to run the tests. They talk to a real Redis on port 6399, which

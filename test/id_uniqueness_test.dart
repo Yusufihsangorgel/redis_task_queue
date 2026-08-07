@@ -2,17 +2,13 @@ import 'package:redis/redis.dart';
 import 'package:redis_task_queue/redis_task_queue.dart';
 import 'package:test/test.dart';
 
-/// Needs a Redis instance. Point REDIS_PORT at one (the CI/dev default is 6399
-/// so it won't clobber a local 6379).
-const _host = 'localhost';
-final _port = int.parse(
-  String.fromEnvironment('REDIS_PORT', defaultValue: '6399'),
-);
+import '_redis.dart';
+
 const _prefix = 'rtq_id_test';
 
 Future<void> _flush() async {
   final conn = RedisConnection();
-  final cmd = await conn.connect(_host, _port);
+  final cmd = await conn.connect(redisHost, redisPort);
   final keys = await cmd.send_object(['KEYS', '$_prefix:*']) as List;
   if (keys.isNotEmpty) {
     await cmd.send_object(['DEL', ...keys.cast<String>()]);
@@ -21,6 +17,8 @@ Future<void> _flush() async {
 }
 
 void main() {
+  requireRedis();
+
   setUp(_flush);
 
   test('ids are unique across many separate clients', () async {
@@ -37,8 +35,8 @@ void main() {
     try {
       for (var c = 0; c < clientCount; c++) {
         final client = await QueueClient.connect(
-          host: _host,
-          port: _port,
+          host: redisHost,
+          port: redisPort,
           prefix: _prefix,
         );
         clients.add(client);
@@ -61,8 +59,8 @@ void main() {
 
   test('a single client mints distinct, ordered ids', () async {
     final client = await QueueClient.connect(
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
     );
     try {

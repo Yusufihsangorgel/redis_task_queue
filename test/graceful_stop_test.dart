@@ -4,29 +4,29 @@ import 'package:redis/redis.dart';
 import 'package:redis_task_queue/redis_task_queue.dart';
 import 'package:test/test.dart';
 
-const _host = 'localhost';
-final _port = int.parse(
-  String.fromEnvironment('REDIS_PORT', defaultValue: '6399'),
-);
+import '_redis.dart';
+
 const _prefix = 'rtq_graceful_test';
 
 Future<void> _flush() async {
-  final cmd = await RedisConnection().connect(_host, _port);
+  final cmd = await RedisConnection().connect(redisHost, redisPort);
   final keys = await cmd.send_object(['KEYS', '$_prefix:*']) as List;
   if (keys.isNotEmpty) await cmd.send_object(['DEL', ...keys.cast<String>()]);
   await cmd.get_connection().close();
 }
 
 void main() {
+  requireRedis();
+
   setUp(_flush);
 
   test('awaiting stop() drains the in-flight task before returning', () async {
-    final client =
-        await QueueClient.connect(host: _host, port: _port, prefix: _prefix);
+    final client = await QueueClient.connect(
+        host: redisHost, port: redisPort, prefix: _prefix);
     final worker = await Worker.connect(
       workerId: 'w1',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
     );
@@ -53,8 +53,8 @@ void main() {
   test('stop() before run() returns an already-completed future', () async {
     final worker = await Worker.connect(
       workerId: 'w2',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
     );
@@ -65,8 +65,8 @@ void main() {
   test('stop() is safe to call twice', () async {
     final worker = await Worker.connect(
       workerId: 'w3',
-      host: _host,
-      port: _port,
+      host: redisHost,
+      port: redisPort,
       prefix: _prefix,
       queues: {'default': 1},
     );
