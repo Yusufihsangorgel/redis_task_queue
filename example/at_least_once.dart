@@ -12,7 +12,10 @@
 ///
 /// Needs a Redis reachable on localhost:6379.
 ///
+///     docker run --rm -p 6379:6379 redis:7
 ///     dart run example/at_least_once.dart
+///
+/// Set `REDIS_PORT` if yours is somewhere else; the test suite uses 6399.
 library;
 
 import 'dart:async';
@@ -22,6 +25,8 @@ import 'dart:io';
 import 'package:redis/redis.dart';
 import 'package:redis_task_queue/redis_task_queue.dart';
 
+import '_redis.dart';
+
 const _queue = 'idempotency-demo';
 const _type = 'invoice:charge';
 const _doneKey = 'rtq-demo:charged';
@@ -30,6 +35,7 @@ const _doneKey = 'rtq-demo:charged';
 File _ledger() => File('${Directory.systemTemp.path}/rtq-ledger.txt');
 
 Future<void> main(List<String> args) async {
+  await requireRedis();
   if (args.contains('--victim')) return _victim(args.contains('--dedup'));
 
   await _round(dedup: false);
@@ -42,10 +48,10 @@ Future<void> _round({required bool dedup}) async {
   print('== $label ==');
 
   _ledger().writeAsStringSync('');
-  final redis = await RedisConnection().connect('localhost', 6379);
+  final redis = await RedisConnection().connect(redisHost, redisPort);
   await redis.send_object(['DEL', _doneKey]);
 
-  final client = await QueueClient.connect();
+  final client = await QueueClient.connect(port: redisPort);
   await client.enqueue(Task(_type, {'invoice': 'INV-4417'}), queue: _queue);
 
   // First run: the worker charges the invoice and dies before acknowledging,
@@ -61,6 +67,7 @@ Future<void> _round({required bool dedup}) async {
   // Second run: recovery hands the same task back, and it runs again.
   final replayed = Completer<void>();
   final worker = await Worker.connect(
+    port: redisPort,
     queues: {_queue: 1},
     workerId: 'idempotency-demo-worker',
   );
@@ -114,8 +121,9 @@ Future<void> _charge(
 /// Charges the invoice and then dies before the worker can acknowledge it, the
 /// gap every at-least-once queue has.
 Future<void> _victim(bool dedup) async {
-  final redis = await RedisConnection().connect('localhost', 6379);
+  final redis = await RedisConnection().connect(redisHost, redisPort);
   final worker = await Worker.connect(
+    port: redisPort,
     queues: {_queue: 1},
     workerId: 'idempotency-demo-worker',
   );

@@ -1,10 +1,19 @@
 # Examples
 
-Three programs. The first is the shortest thing that works. The other two
+Four programs. The first is the shortest thing that works. The other three
 answer the questions you should put to any queue before it carries work you
 care about, and they answer them by running, not by asserting.
 
-All three need a Redis reachable on `localhost:6379`.
+All four talk to a real Redis on `localhost:6379`. If you do not have one:
+
+```
+docker run --rm -p 6379:6379 redis:7
+```
+
+That container keeps nothing when it stops. The test suite deliberately uses
+6399 instead, so `dart test` cannot touch a Redis you are already using. All
+four programs read `REDIS_PORT`, so one already running on 6399 serves them
+too: `REDIS_PORT=6399 dart run example/triage.dart`.
 
 ## Start here
 
@@ -83,6 +92,86 @@ Note that both runs are `attempt 1`. A crash does not spend a retry, because
 nothing failed: the task is handed back in the state it was claimed in. The
 attempt counter moves only when a handler throws.
 
+## Some work never succeeds. Where does it go?
+
+```
+dart run example/triage.dart
+```
+
+To the dead-letter list, which is the one structure here with no worker attached
+to it: what arrives stays until a person decides otherwise. `triage.dart` fails
+three webhook deliveries for good and then does that deciding, which is three
+calls — `deadLetters()` to see what died and why, `replayDeadLetter()` for the
+one whose cause has been fixed, `purgeDeadLetters()` for the two that never can.
+It prints the queue depth at every step. Real output:
+
+```
+three webhook deliveries go on the queue
+   acme     cd2ba80eb0d7681a13423184-1
+   globex   cd2ba80eb0d7681a13423184-2
+   initech  cd2ba80eb0d7681a13423184-3
+   [queued] pending 3 · delayed 0 · in flight 0 · dead 0
+
+1. a worker runs them. Every attempt throws, so every one gives up
+   gave up on acme after 2 attempts
+   gave up on globex after 2 attempts
+   gave up on initech after 2 attempts
+   [gave up] pending 0 · delayed 0 · in flight 0 · dead 3
+
+2. the dead-letter list is what is left. Read it before deciding
+   initech  cd2ba80eb0d7681a13423184-3
+      2 attempts, died 2026-08-08T13:29:06.305
+      Bad state: no signing key for "initech"; refusing to POST https://initech.example/hooks/orders unsigned
+   globex   cd2ba80eb0d7681a13423184-2
+      2 attempts, died 2026-08-08T13:29:06.304
+      Bad state: POST https://globex.example/hooks/orders -> 410 Gone
+   acme     cd2ba80eb0d7681a13423184-1
+      2 attempts, died 2026-08-08T13:29:06.300
+      Bad state: POST https://acme.example/hooks/orders -> 410 Gone
+
+3. two of those are 410 Gone: the endpoint is deleted, so replaying
+   them is a round trip back to this list. The third is our own
+   missing config. Fix that, then put the one task back.
+   replayDeadLetter -> true
+   [replayed] pending 1 · delayed 0 · in flight 0 · dead 2
+   one call moved it: off the dead list and onto the queue inside a
+   single Lua step. Doing it by hand is two commands with a gap in
+   the middle, and a crash in that gap either loses the task or
+   enqueues it twice.
+
+4. a worker starts again, and this time the delivery goes through
+   delivered to initech (signed with key-3)
+   [delivered] pending 0 · delayed 0 · in flight 0 · dead 2
+
+5. the two that can never succeed are cleared
+   purgeDeadLetters -> 2 entries
+   [purged] pending 0 · delayed 0 · in flight 0 · dead 0
+
+what never succeeds is not lost. It is parked where a human can read it,
+and putting one back is one call.
+```
+
+The order matters more than it looks. A replayed task starts its retry budget
+again from zero, so replaying something whose cause is still there just walks it
+back onto the list a few seconds later. `initech` only got through in step 4
+because step 3 added the signing key it was missing first.
+
+The four numbers on every line are one `stats()` call. It reads counters rather
+than tasks, so it is cheap enough to sit behind a dashboard or an alert. Name the
+queues you want when you call it:
+
+```dart
+final depth = await client.stats(queues: ['webhooks']);
+if (depth.deadLetter > 0) alert('$depth');
+```
+
+With no argument `stats()` discovers queues by scanning for their keys, and Redis
+drops a list as soon as it empties — so a queue that is merely quiet vanishes
+from the report rather than reporting zero. A named queue always reports, which
+is what a fixed dashboard needs. `deadLetter` and `inFlight` are totals across
+the whole prefix either way: one dead-letter list is shared by every queue, and
+in-flight is summed over every worker.
+
 ## Three things to settle before this carries real work
 
 ### The worker id is an identity, not a nonce
@@ -126,11 +215,11 @@ A separate "have I done this?" check before the work is the same idea with a
 race left in it: the process can still die between the check and the effect.
 Recording the id in the same transaction as the result is what closes it.
 
-### Retries end somewhere, and something has to watch where
+### Something has to say the list grew
 
-A task that keeps throwing is retried with an exponential backoff until its
-attempts run out, then it moves to the dead-letter list. Nothing drains that
-list for you, and a queue nobody reads is an outage nobody hears about.
+The triage above began with somebody already looking at the dead-letter list. In
+production nobody is looking, so the give-up has to announce itself. These two
+callbacks are where it does:
 
 ```dart
 final worker = await Worker.connect(

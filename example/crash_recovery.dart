@@ -9,7 +9,10 @@
 ///
 /// Needs a Redis reachable on localhost:6379.
 ///
+///     docker run --rm -p 6379:6379 redis:7
 ///     dart run example/crash_recovery.dart
+///
+/// Set `REDIS_PORT` if yours is somewhere else; the test suite uses 6399.
 library;
 
 import 'dart:async';
@@ -17,6 +20,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:redis_task_queue/redis_task_queue.dart';
+
+import '_redis.dart';
 
 const _queue = 'crash-demo';
 const _type = 'report:build';
@@ -27,9 +32,10 @@ const _type = 'report:build';
 const _workerId = 'crash-demo-worker';
 
 Future<void> main(List<String> args) async {
+  await requireRedis();
   if (args.contains('--victim')) return _victim();
 
-  final client = await QueueClient.connect();
+  final client = await QueueClient.connect(port: redisPort);
   final id = await client.enqueue(
     Task(_type, {'report': 'march-invoices'}),
     queue: _queue,
@@ -54,6 +60,7 @@ Future<void> main(List<String> args) async {
   print('3. a worker starts again under the same id');
   final ran = Completer<void>();
   final worker = await Worker.connect(
+    port: redisPort,
     queues: {_queue: 1},
     workerId: _workerId,
   );
@@ -84,6 +91,7 @@ Future<void> main(List<String> args) async {
 /// graceful shutdown would have done.
 Future<void> _victim() async {
   final worker = await Worker.connect(
+    port: redisPort,
     queues: {_queue: 1},
     workerId: _workerId,
   );

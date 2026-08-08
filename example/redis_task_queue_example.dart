@@ -1,6 +1,6 @@
-import 'dart:io';
-
 import 'package:redis_task_queue/redis_task_queue.dart';
+
+import '_redis.dart';
 
 /// Run a Redis instance, then start this in two terminals:
 ///   dart run example/redis_task_queue_example.dart worker
@@ -12,12 +12,11 @@ import 'package:redis_task_queue/redis_task_queue.dart';
 /// Set `REDIS_PORT=6399` to point the example at that one.
 Future<void> main(List<String> args) async {
   final mode = args.isEmpty ? 'enqueue' : args.first;
-  final port = int.parse(Platform.environment['REDIS_PORT'] ?? '6379');
-  await _requireRedis(port);
+  await requireRedis();
 
   if (mode == 'worker') {
     final worker = await Worker.connect(
-      port: port,
+      port: redisPort,
       workerId: 'example-worker',
     );
     worker.handle('email:welcome', (task, context) async {
@@ -35,7 +34,7 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  final client = await QueueClient.connect(port: port);
+  final client = await QueueClient.connect(port: redisPort);
   final id = await client.enqueue(
     Task('email:welcome', {'user_id': '42'}),
     queue: 'default',
@@ -43,24 +42,4 @@ Future<void> main(List<String> args) async {
   );
   print('enqueued task $id');
   await client.close();
-}
-
-/// Stops with the command that fixes it, rather than an unhandled
-/// `SocketException` with a stack trace nobody needs to read.
-Future<void> _requireRedis(int port) async {
-  try {
-    final socket = await Socket.connect(
-      'localhost',
-      port,
-      timeout: const Duration(seconds: 2),
-    );
-    socket.destroy();
-  } on SocketException {
-    stderr.writeln(
-      'This example needs a Redis listening on localhost:$port.\n'
-      '  docker run --rm -p $port:6379 redis:7\n'
-      'Set REDIS_PORT if yours is somewhere else (the tests use 6399).',
-    );
-    exit(69); // EX_UNAVAILABLE
-  }
 }
