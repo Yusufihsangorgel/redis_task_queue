@@ -1,3 +1,13 @@
+## 1.0.3
+
+- **The example connected to the wrong Redis if you had followed the README.**
+  It used the library default of 6379 while "Running the tests" tells you to
+  start a container on 6399, so a reader who did both in order got an unhandled
+  `TaskQueueConnectionException` and a stack trace. It now reads `REDIS_PORT`,
+  defaults to 6379, and says which port it wants and that the tests use a
+  different one. With nothing listening it exits 69 with the docker command
+  rather than throwing.
+
 ## 1.0.2
 
 - **Make `REDIS_PORT` work.** Ten test files carried the line "Point
