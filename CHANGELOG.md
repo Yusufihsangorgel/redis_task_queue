@@ -1,3 +1,22 @@
+## 1.0.4
+
+- Add `example/triage.dart`, a walkthrough of the dead-letter list. No
+  existing example showed what to do with work that never succeeds. This one
+  fails three webhook deliveries for good, reads back what died and why with
+  `deadLetters()`, fixes the one cause that was ours (a missing signing key),
+  puts that single task back with `replayDeadLetter()`, and purges the two
+  whose endpoints are gone. It prints the queue depth from `stats()` after
+  every step, and wires `onDeadLetter` as the alert that says the list grew.
+- The four examples share one connection setup, `example/_redis.dart`. Each
+  now reads `REDIS_PORT` and probes the port before starting. Previously only
+  the basic example did; `at_least_once.dart` and `crash_recovery.dart` were
+  hardwired to 6379, and pointing `REDIS_PORT` at the test suite's 6399
+  changed nothing for them.
+- `example/README.md` opens with the docker command that supplies a Redis and
+  walks the triage program step by step with its real output.
+
+No library code changed in this release.
+
 ## 1.0.3
 
 - **The example connected to the wrong Redis if you had followed the README.**
