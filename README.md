@@ -18,6 +18,37 @@ The path a task takes, end to end:
 ![The path a task takes: a producer enqueues to weighted Redis lists, a worker claims each task onto an in-flight list with LMOVE and runs the handler, tasks left in flight by a crashed worker are requeued on restart, and on failure the task is backed off in a delayed set or sent to the dead-letter list](doc/task-flow.png)
 
 
+## Why this instead of what you already have
+
+**Instead of a `BRPOP` loop.** `BRPOP` deletes the task from Redis the moment
+it returns it. Kill the worker between that line and the end of your handler
+and the task is gone, because nothing else holds a copy. This package claims a
+task with `LMOVE`/`BLMOVE ... RIGHT LEFT` onto a list keyed by worker id: a
+non-blocking sweep across the weighted queues tries `LMOVE` first
+(`worker.dart:427`), falling back to a one-second `BLMOVE` on the top-weight
+queue only once every queue comes up empty (`worker.dart:432`). A worker that
+restarts reads its own list back with `LRANGE` and requeues whatever is still
+sitting there (`worker.dart:446`).
+
+**Instead of stem_redis.** No honest difference to report. It answers the same
+problem with Redis Streams consumer groups, and it has a dead-letter store with
+replay and purge (`redis_broker.dart:977`, `1037`, `1088`). I looked for a
+defect in it and did not find one. What is checkable is packaging: `stem_redis`
+depends on `stem`, a larger job platform (its `pubspec.yaml` pins
+`stem: ">=0.2.1 <0.3.0"`), where this package depends only on `redis`. If you
+already run `stem`, its broker is the right answer.
+
+## Reach for it when
+
+- A request path has to return before the slow part finishes: sending email,
+  processing an upload, calling a third-party API that times out.
+- The work has to survive a worker being killed halfway through it.
+- You run several queues and a busy one must not starve the quiet ones.
+
+Skip it if the work fits in the same process and you are not already running
+Redis. A queue you have to operate is a real cost, and one `Future` chain often
+is the right answer.
+
 > **Background:** I wrote up the design decisions behind this — porting the Asynq model to Dart, and what I left out — [on my blog](https://yusufihsangorgel.github.io/2026/07/08/asynq-for-dart.html).
 
 ## Why
