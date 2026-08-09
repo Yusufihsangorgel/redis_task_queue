@@ -10,7 +10,7 @@ recovered on restart, not lost.
 
 If you've used [Asynq](https://github.com/hibiken/asynq) in Go or Sidekiq in
 Ruby, the model will feel familiar. Dart server frameworks (Serverpod,
-Dart Frog, Shelf) don't have a maintained equivalent, so this fills that gap
+Dart Frog, Shelf) don't have a maintained equivalent; this fills that gap
 with a deliberately small surface.
 
 The path a task takes, end to end:
@@ -98,8 +98,8 @@ worker.handle('email:welcome', (task, context) async {
   // Real work. Throwing triggers a retry; returning marks the task done.
   //
   // `context` describes this run: `context.id` is the task's id, the same on
-  // every attempt and after a crash recovery, so it is what to record against
-  // the effect. `context.attempt`, `context.maxAttempts` and
+  // every attempt and after a crash recovery, making it the thing to record
+  // against the effect. `context.attempt`, `context.maxAttempts` and
   // `context.isLastAttempt` say where in the retry budget this run sits.
   await sendWelcomeEmail(task.payload['user_id'] as String);
 });
@@ -108,7 +108,7 @@ await worker.run();
 ```
 
 To shut down gracefully, on a SIGTERM or a rolling deploy, await `stop()`: it
-stops claiming new tasks and returns once the task in progress has finished, so
+stops claiming new tasks and returns once the task in progress has finished;
 work is drained rather than abandoned to recovery on the next start.
 
 ```dart
@@ -124,8 +124,8 @@ retries are exhausted, on the dead-letter list:
 ![Task state machine: pending to processing to done; a worker that dies while processing returns the task to pending on restart; on failure it goes to retry then a delayed backoff or, once retries are exhausted, the dead-letter list](doc/task-states.png)
 
 - **Weighted queues.** With `{'critical': 6, 'default': 3, 'low': 1}` the worker
-  gives `critical` first look six times as often as `low` (a rotating cursor
-  over the weighted order), so under load the queues are served roughly 6:3:1.
+  gives `critical` first look six times as often as `low`, rotating a cursor
+  over the weighted order. Under load the queues are served roughly 6:3:1.
   A flood of low-priority jobs can't starve important ones — and, unlike strict
   priority, a flood of critical jobs can't fully starve `low` either, since it
   still leads one sweep in every ten.
@@ -147,7 +147,7 @@ retries are exhausted, on the dead-letter list:
   crashed after finishing but before the removal), so **handlers must be
   idempotent** — the same contract as Sidekiq or Asynq. The handler is given
   what it needs to hold up its end: `context.id` is assigned at enqueue and is
-  identical on every attempt and every recovery, so it is the key to write
+  identical on every attempt and every recovery, which makes it the key to write
   against the effect. `example/at_least_once.dart` stages the crash and counts
   the result, with and without that defence.
 - **Reconnects after a dropped connection.** Neither a `Worker` nor a
@@ -157,12 +157,12 @@ retries are exhausted, on the dead-letter list:
   For `QueueClient`, a call whose retry also fails still throws — Redis is
   genuinely down, not just blipped, and the caller needs to know that. For
   `Worker.run()`, that same failure doesn't end the loop: it backs off,
-  reconnects, reruns orphan recovery, and keeps polling, so a dropped
+  reconnects, reruns orphan recovery, and keeps polling; a dropped
   connection costs a delay, not the worker.
 - **Due-mover.** Each poll-loop pass, before it claims the next task, the worker
   promotes any delayed tasks whose score has passed back onto their pending
   list. The move runs inside a single Redis Lua script (`ZRANGEBYSCORE` +
-  `ZREM` + `LPUSH`), so it's atomic — a task can't be lost or duplicated, even
+  `ZREM` + `LPUSH`), one atomic step — a task can't be lost or duplicated, even
   if several workers run the mover at once. Claims use a short (1s) blocking
   wait, so a due task waits at most about a second past its scheduled time.
 - **Dead-letter list.** Once retries are exhausted, the task moves to a
@@ -171,10 +171,10 @@ retries are exhausted, on the dead-letter list:
   returns the entries (each a `DeadLetter` with the task, the queue, the error
   text, the attempt count, and when it died), `replayDeadLetter(id)` re-enqueues
   one onto its queue for a fresh set of attempts once you have fixed the cause,
-  and `purgeDeadLetters()` clears them out. Nothing drains the list for you, so
-  a queue nobody reads is an outage nobody hears about.
+  and `purgeDeadLetters()` clears them out. Nothing drains the list for you.
+  A queue nobody reads is an outage nobody hears about.
 - **Missing handler = failure.** A task with no registered handler is retried,
-  not silently dropped, so a wiring mistake surfaces loudly.
+  not silently dropped; a wiring mistake surfaces loudly.
 
 ## Triaging the dead-letter list
 
@@ -190,9 +190,9 @@ await client.replayDeadLetter(deadId);
 await client.purgeDeadLetters();
 ```
 
-A replay removes the entry and re-enqueues the task in one atomic step, so it
-can't be dropped from the dead-letter list without landing back on its queue,
-or enqueued twice if two callers replay it at once.
+A replay removes the entry and re-enqueues the task in one atomic step: the task
+can't be dropped from the dead-letter list without landing back on its queue, or
+enqueued twice if two callers replay it at once.
 
 ## Seeing how deep the queue is
 
@@ -203,10 +203,10 @@ print('pending ${stats.totalPending}, in flight ${stats.inFlight}, '
 print(stats.pending); // {critical: 0, default: 128, low: 12}
 ```
 
-`stats()` reads counters, not tasks, so it is cheap enough to poll for a
+`stats()` reads counters, not tasks. That makes it cheap enough to poll for a
 dashboard or a backlog alert: a pending count that only climbs means the workers
 are behind, and a dead-letter count that climbs means something is failing for
-good. It discovers the active queues with a `SCAN` (never `KEYS`, so it does not
+good. It discovers the active queues with a `SCAN` (never `KEYS`, which would
 block Redis). Pass `queues: [...]` to count exactly those instead, which also
 reports a queue that has no keys yet as zero rather than omitting it.
 
@@ -226,7 +226,7 @@ A `StatefulSet` pod name, a service name, or a host name plus a slot number all
 satisfy both. There is deliberately no default: the obvious one (the host name)
 is silently wrong the moment a second worker starts on the same machine, and
 picking it for you would hide that. Passing the same id to two workers in one
-isolate throws a `StateError`; across processes nothing can detect it, so choose
+isolate throws a `StateError`; across processes nothing can detect it. Choose
 ids that cannot collide.
 
 The one case this doesn't cover on its own: a worker that dies and is *never*
@@ -282,7 +282,7 @@ dart run example/redis_task_queue_example.dart enqueue
 
 ## Running the tests
 
-The tests talk to a real Redis rather than a fake, so they need one listening on
+The tests talk to a real Redis rather than a fake. They need one listening on
 port 6399. That is what CI does: it runs a `redis:7` container with the
 container's 6379 published on 6399, then `dart test` with no arguments.
 
