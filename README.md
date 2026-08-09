@@ -18,6 +18,9 @@ The path a task takes, end to end:
 ![The path a task takes: a producer enqueues to weighted Redis lists, a worker claims each task onto an in-flight list with LMOVE and runs the handler, tasks left in flight by a crashed worker are requeued on restart, and on failure the task is backed off in a delayed set or sent to the dead-letter list](doc/task-flow.png)
 
 
+![A worker is killed holding a task, and a worker starting again under the same
+id recovers and finishes it](https://raw.githubusercontent.com/Yusufihsangorgel/redis_task_queue/main/doc/demo.gif)
+
 ## Why this instead of what you already have
 
 **Instead of a `BRPOP` loop.** `BRPOP` deletes the task from Redis the moment

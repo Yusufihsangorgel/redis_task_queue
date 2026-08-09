@@ -1,3 +1,10 @@
+## 1.1.1
+
+- The README opens with a recording of `example/crash_recovery.dart`: a worker
+  is killed while holding a task, and a worker starting again under the same id
+  recovers and finishes it. That is the thing the package is for, and the page
+  used to open with a diagram of it instead.
+
 ## 1.1.0
 
 - The README now answers, in its first screen, why to reach for this rather
