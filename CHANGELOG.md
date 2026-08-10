@@ -1,3 +1,13 @@
+## 1.1.2
+
+- Tests for the stored format, which had none of its own. Every other test
+  here needs a Redis listening, so encode and decode were only exercised in
+  passing, as a side effect of a job completing -- and a round trip that
+  quietly drops a field still looks like a job that ran. Thirteen tests now
+  cover the envelope round trip, the dead-letter wrapper, and reading entries
+  written before 0.8.0, which is a documented promise that nothing checked.
+  They need no Redis, so they run anywhere. No behaviour changed.
+
 ## 1.1.1
 
 - The README opens with a recording of `example/crash_recovery.dart`: a worker
