@@ -183,7 +183,9 @@ retries are exhausted, on the dead-letter list:
   what it needs to hold up its end: `context.id` is assigned at enqueue and is
   identical on every attempt and every recovery, which makes it the key to write
   against the effect. `example/at_least_once.dart` stages the crash and counts
-  the result, with and without that defence.
+  the result, with and without that defence — and
+  `example/no_redis_demo.dart` walks the same three attempts with nothing
+  installed at all, so the contract is readable before you start a server.
 - **Reconnects after a dropped connection.** Neither a `Worker` nor a
   `QueueClient` breaks permanently when the connection to Redis drops (a
   restart, a managed-Redis failover, a proxy's idle timeout): every Redis call

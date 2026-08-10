@@ -1,3 +1,12 @@
+## 1.1.3
+
+- New `example/no_redis_demo.dart`, the only example here that runs with
+  nothing installed. Every other one exits 69 asking for a server, so a reader
+  deciding whether to install anything saw four error messages and no idea what
+  the package does. This walks one task through three attempts and shows the
+  thing that costs money when it is missed: at-least-once means a handler can
+  run twice, and `TaskContext.id` is what makes that safe to decide.
+
 ## 1.1.2
 
 - Tests for the stored format, which had none of its own. Every other test
