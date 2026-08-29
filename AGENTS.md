@@ -99,7 +99,7 @@ On SIGTERM: `await worker.stop(); await worker.close();`
 
 - `lib/redis_task_queue.dart` — public exports. Implementation: `lib/src/`
   (`client.dart`, `worker.dart`, `task.dart`, `exceptions.dart`, `stats.dart`).
-- `example/` — enqueue/worker, crash recovery, idempotency, dead-letter triage.
+- `example/` — enqueue/worker, HTTP-backend wiring, crash recovery, idempotency, dead-letter triage.
 - `test/` — integration tests against a real Redis.
 
 Tests talk to Redis on **6399** (not 6379):

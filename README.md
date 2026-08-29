@@ -84,6 +84,11 @@ await client.enqueue(
 ```
 
 `enqueue` is a single `LPUSH` — keep one client around and reuse it.
+A client per HTTP request is a TCP handshake (and a leaked socket if
+`close` is skipped) on every enqueue. `example/backend.dart` is the
+wiring: the client lives next to the `HttpServer`, the worker is a
+separate process, and SIGTERM waits for the task in flight. The
+comments show how that maps onto dart_frog and shelf.
 
 ## Schedule for later
 
@@ -144,6 +149,7 @@ await worker.run();
 To shut down gracefully, on a SIGTERM or a rolling deploy, await `stop()`: it
 stops claiming new tasks and returns once the task in progress has finished;
 work is drained rather than abandoned to recovery on the next start.
+`example/backend.dart` wires that onto the signal.
 
 ```dart
 await worker.stop();
@@ -315,6 +321,22 @@ dart run example/redis_task_queue_example.dart worker
 # terminal 2
 dart run example/redis_task_queue_example.dart enqueue
 ```
+
+The dart_frog / shelf shape — one `QueueClient` next to the HTTP server,
+a worker as its own process, SIGTERM waiting for the task in flight:
+
+```bash
+# terminal 1
+dart run example/backend.dart serve
+# terminal 2
+dart run example/backend.dart worker
+# terminal 3
+curl -X POST http://127.0.0.1:8080/jobs
+```
+
+`dart run example/backend.dart` with no args starts both, POSTs a job,
+then SIGTERMs the worker while the handler is still running, so the
+drain is visible.
 
 ## Running the tests
 

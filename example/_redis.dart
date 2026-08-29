@@ -1,4 +1,4 @@
-/// Connection settings shared by the four example programs.
+/// Connection settings shared by the example programs.
 ///
 /// One place, because each program opens more than one connection: a client
 /// and a worker at least, plus a raw `RedisConnection` in the two that set up

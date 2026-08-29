@@ -1,19 +1,23 @@
 # Examples
 
-Four programs. The first is the shortest thing that works. The other three
-answer the questions you should put to any queue before it carries work you
-care about, and they answer them by running, not by asserting.
+The first program is the shortest thing that works. Three more answer the
+questions you should put to any queue before it carries work you care about,
+and they answer them by running, not by asserting. `backend.dart` is how
+the producer sits in an HTTP handler and the worker in its own process —
+the wiring a dart_frog or shelf reader otherwise has to invent.
+`no_redis_demo.dart` walks the handler contract with nothing listening.
 
-All four talk to a real Redis on `localhost:6379`. If you do not have one:
+Every program that talks to Redis looks on `localhost:6379`. If you do not
+have one:
 
 ```
 docker run --rm -p 6379:6379 redis:7
 ```
 
 That container keeps nothing when it stops. The test suite deliberately uses
-6399 instead, so `dart test` cannot touch a Redis you are already using. All
-four programs read `REDIS_PORT`, so one already running on 6399 serves them
-too: `REDIS_PORT=6399 dart run example/triage.dart`.
+6399 instead, so `dart test` cannot touch a Redis you are already using. The
+Redis-backed programs read `REDIS_PORT`, so one already running on 6399
+serves them too: `REDIS_PORT=6399 dart run example/triage.dart`.
 
 ## Start here
 
@@ -26,6 +30,52 @@ dart run example/redis_task_queue_example.dart enqueue   # another
 use `QueueClient`, workers use `Worker`, and the two only agree on a type string
 and a JSON payload, so the enqueuing side never has to import the handler's
 code.
+
+## Where does the client live in a dart_frog or shelf app?
+
+```
+dart run example/backend.dart serve     # one terminal
+dart run example/backend.dart worker    # another
+curl -X POST http://127.0.0.1:8080/jobs
+```
+
+Not in the handler. `QueueClient.connect` per request is a TCP handshake
+every time, and a leaked Redis socket if the handler returns without
+`close()`. The HTTP process constructs one client next to the server
+(the same place dart_frog's `init` / middleware, or a shelf pipeline,
+holds shared state) and the handler only calls `enqueue`. The worker is
+a second executable, not a route.
+
+`dart:io`'s `HttpServer` stands in so this package does not grow a
+framework dependency. With no args the program starts both processes,
+POSTs a job, then SIGTERMs the worker while the handler is still
+running, which is what `await worker.stop()` is for: the in-flight task
+finishes, then the process leaves. SIGKILL would have been crash
+recovery instead. Real output:
+
+```
+two processes, the way this sits in a Dart HTTP backend
+
+1. the worker is its own process, not a route
+   [worker] worker running (SIGTERM to stop)
+
+2. the HTTP process holds one QueueClient for its lifetime
+   [serve] listening on http://127.0.0.1:54706
+
+3. a request enqueues and returns; the handler does not do the work
+   [serve] enqueued 319baeb8459ac2540a0b6226-1
+   POST /jobs -> 202 319baeb8459ac2540a0b6226-1
+   [worker] holding 319baeb8459ac2540a0b6226-1
+
+4. SIGTERM arrives while the handler is still running
+   SIGTERM sent to worker pid 49415
+   [worker] stop(): waiting for the task in flight (SIGTERM)
+   [worker] sent welcome email for user 42 (task 319baeb8459ac2540a0b6226-1)
+   worker exited 0 after finishing the task
+
+the in-flight task was not abandoned. SIGKILL would have been
+crash recovery; this was a drain.
+```
 
 ## Does a dying worker lose the task?
 

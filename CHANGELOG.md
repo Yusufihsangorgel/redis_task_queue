@@ -1,3 +1,19 @@
+## 1.1.4
+
+- New `example/backend.dart`, the wiring a dart_frog or shelf reader
+  otherwise has to invent. The type signatures do not say that
+  `QueueClient` is process-lifetime (a client per request is a TCP
+  handshake, and a leaked socket if `close` is skipped), that the
+  worker is a separate process, or that SIGTERM has to `await
+  worker.stop()` so the task in flight finishes rather than being
+  abandoned to recovery. The example is an `HttpServer` with one
+  client, a worker as its own entry point, and a run that SIGTERMs the
+  worker mid-handler so that drain is visible. No new dependency:
+  `dart:io` stands in for the framework.
+- The README's "from your request path" section now points at it.
+
+No library code changed in this release.
+
 ## 1.1.3
 
 - New `example/no_redis_demo.dart`, the only example here that runs with
