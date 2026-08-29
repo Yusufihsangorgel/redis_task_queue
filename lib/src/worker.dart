@@ -76,11 +76,11 @@ final class Worker {
     required double backoffJitter,
     TaskErrorCallback? onError,
     TaskDeadLetterCallback? onDeadLetter,
-  })  : _backoffBase = backoffBase,
-        _backoffCap = backoffCap,
-        _backoffJitter = backoffJitter,
-        _onError = onError,
-        _onDeadLetter = onDeadLetter;
+  }) : _backoffBase = backoffBase,
+       _backoffCap = backoffCap,
+       _backoffJitter = backoffJitter,
+       _onError = onError,
+       _onDeadLetter = onDeadLetter;
 
   /// Worker ids currently claimed in this isolate, as `host:port|prefix|id`.
   /// Guards against two live workers sharing an in-flight list; see [connect].
@@ -297,7 +297,9 @@ return 0
         return await _command.send_object(command);
       } on Object catch (e, s) {
         Error.throwWithStackTrace(
-            wrapRedisError(e, command.first as String), s);
+          wrapRedisError(e, command.first as String),
+          s,
+        );
       }
     }
   }
@@ -423,14 +425,23 @@ return 0
     _claimCursor = (_claimCursor + 1) % n;
 
     for (final queue in order) {
-      final raw = await _send(
-        ['LMOVE', _keys.pending(queue), inFlight, 'RIGHT', 'LEFT'],
-      );
+      final raw = await _send([
+        'LMOVE',
+        _keys.pending(queue),
+        inFlight,
+        'RIGHT',
+        'LEFT',
+      ]);
       if (raw != null) return raw as String;
     }
-    final raw = await _send(
-      ['BLMOVE', _keys.pending(topQueue), inFlight, 'RIGHT', 'LEFT', '1'],
-    );
+    final raw = await _send([
+      'BLMOVE',
+      _keys.pending(topQueue),
+      inFlight,
+      'RIGHT',
+      'LEFT',
+      '1',
+    ]);
     // A hit returns the moved envelope as a String; on timeout the client
     // returns `[null]`. Anything that isn't a String means nothing was claimed.
     return raw is String ? raw : null;
@@ -502,18 +513,16 @@ return 0
     // Done: drop the envelope from the in-flight list. If the worker dies before
     // this runs, recovery requeues the task on the next start and an idempotent
     // handler absorbs the repeat.
-    await _send(
-      ['LREM', _keys.inFlight(_workerId), '1', raw],
-    );
+    await _send(['LREM', _keys.inFlight(_workerId), '1', raw]);
   }
 
   /// The run in progress, as the handler and the observers both see it.
   TaskContext _contextFor(Envelope env) => TaskContext(
-        id: env.id,
-        queue: env.queue,
-        attempt: env.attempt + 1,
-        maxAttempts: env.maxRetries + 1,
-      );
+    id: env.id,
+    queue: env.queue,
+    attempt: env.attempt + 1,
+    maxAttempts: env.maxRetries + 1,
+  );
 
   Future<void> _retryOrDeadLetter(
     String raw,
@@ -531,17 +540,15 @@ return 0
         error.toString(),
         DateTime.now().millisecondsSinceEpoch,
       );
-      await _send(
-        [
-          'EVAL',
-          _deadScript,
-          '2',
-          inFlight,
-          _keys.deadLetter(),
-          raw,
-          deadEntry
-        ],
-      );
+      await _send([
+        'EVAL',
+        _deadScript,
+        '2',
+        inFlight,
+        _keys.deadLetter(),
+        raw,
+        deadEntry,
+      ]);
       _notify(() => _onDeadLetter?.call(env.task, context, error, stackTrace));
       return;
     }
@@ -550,7 +557,8 @@ return 0
     // immediately: score it with the time it becomes due and drop it in the
     // queue's delayed set, atomically with removing it from the in-flight list.
     // The run loop's mover promotes it once due.
-    final dueAt = DateTime.now().millisecondsSinceEpoch +
+    final dueAt =
+        DateTime.now().millisecondsSinceEpoch +
         _backoffFor(env.attempt).inMilliseconds;
     await _send([
       'EVAL',

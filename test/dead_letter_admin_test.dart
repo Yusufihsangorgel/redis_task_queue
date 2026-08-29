@@ -19,14 +19,14 @@ Future<void> _flush() async {
 }
 
 Future<Worker> _worker({int weight = 1}) => Worker.connect(
-      workerId: 'w1',
-      host: redisHost,
-      port: redisPort,
-      prefix: _prefix,
-      queues: {'default': weight},
-      backoffBase: const Duration(milliseconds: 5),
-      backoffCap: const Duration(milliseconds: 20),
-    );
+  workerId: 'w1',
+  host: redisHost,
+  port: redisPort,
+  prefix: _prefix,
+  queues: {'default': weight},
+  backoffBase: const Duration(milliseconds: 5),
+  backoffCap: const Duration(milliseconds: 20),
+);
 
 Future<bool> _pollUntil(
   FutureOr<bool> Function() check, {
@@ -47,7 +47,10 @@ void main() {
 
   test('a dead-lettered task is inspectable, with its error', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     final worker = await _worker();
     worker.handle('doomed', (task, context) {
       throw StateError('upstream is on fire');
@@ -79,7 +82,10 @@ void main() {
 
   test('replaying re-runs the task and clears it from the dead list', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     var attempts = 0;
     final succeeded = Completer<void>();
     final worker = await _worker();
@@ -94,7 +100,8 @@ void main() {
 
     final id = await client.enqueue(Task('flaky', {}), maxRetries: 1);
     await _pollUntil(
-        () async => (await client.deadLetters()).any((d) => d.id == id));
+      () async => (await client.deadLetters()).any((d) => d.id == id),
+    );
 
     // Replay it. It should leave the dead list and run again to success.
     expect(await client.replayDeadLetter(id), isTrue);
@@ -114,14 +121,20 @@ void main() {
 
   test('replaying an unknown id returns false', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     expect(await client.replayDeadLetter('no-such-id'), isFalse);
     await client.close();
   });
 
   test('purge empties the list and reports the count', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     final worker = await _worker();
     worker.handle('boom', (task, context) => throw StateError('always'));
     final loop = worker.run();

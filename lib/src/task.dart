@@ -17,9 +17,9 @@ final class Task {
   Map<String, dynamic> toJson() => {'type': type, 'payload': payload};
 
   static Task fromJson(Map<String, dynamic> json) => Task(
-        json['type'] as String,
-        (json['payload'] as Map).cast<String, dynamic>(),
-      );
+    json['type'] as String,
+    (json['payload'] as Map).cast<String, dynamic>(),
+  );
 }
 
 /// What the worker knows about the run in progress, handed to a handler
@@ -87,12 +87,12 @@ class Envelope {
   int attempt;
 
   String encode() => jsonEncode({
-        'id': id,
-        'task': task.toJson(),
-        'queue': queue,
-        'max_retries': maxRetries,
-        'attempt': attempt,
-      });
+    'id': id,
+    'task': task.toJson(),
+    'queue': queue,
+    'max_retries': maxRetries,
+    'attempt': attempt,
+  });
 
   static Envelope decode(String raw) {
     final json = jsonDecode(raw) as Map<String, dynamic>;
@@ -100,27 +100,27 @@ class Envelope {
   }
 
   static Envelope fromJson(Map<String, dynamic> json) => Envelope(
-        id: json['id'] as String,
-        task: Task.fromJson((json['task'] as Map).cast<String, dynamic>()),
-        queue: json['queue'] as String,
-        maxRetries: json['max_retries'] as int,
-        attempt: json['attempt'] as int,
-      );
+    id: json['id'] as String,
+    task: Task.fromJson((json['task'] as Map).cast<String, dynamic>()),
+    queue: json['queue'] as String,
+    maxRetries: json['max_retries'] as int,
+    attempt: json['attempt'] as int,
+  );
 
   /// Wraps this envelope for the dead-letter list, keeping the failure that
   /// gave up on it. [error] is the last attempt's error, [deadAt] when it was
   /// dead-lettered.
   String encodeDead(String error, int deadAt) => jsonEncode({
-        'envelope': {
-          'id': id,
-          'task': task.toJson(),
-          'queue': queue,
-          'max_retries': maxRetries,
-          'attempt': attempt,
-        },
-        'error': error,
-        'dead_at': deadAt,
-      });
+    'envelope': {
+      'id': id,
+      'task': task.toJson(),
+      'queue': queue,
+      'max_retries': maxRetries,
+      'attempt': attempt,
+    },
+    'error': error,
+    'dead_at': deadAt,
+  });
 }
 
 /// A task that exhausted its retries and is parked on the dead-letter list,

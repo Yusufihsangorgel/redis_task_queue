@@ -21,14 +21,13 @@ void main() {
     String queue = 'default',
     int maxRetries = 3,
     int attempt = 0,
-  }) =>
-      Envelope(
-        id: id,
-        task: Task(type, payload ?? {'to': 'someone@example.com'}),
-        queue: queue,
-        maxRetries: maxRetries,
-        attempt: attempt,
-      );
+  }) => Envelope(
+    id: id,
+    task: Task(type, payload ?? {'to': 'someone@example.com'}),
+    queue: queue,
+    maxRetries: maxRetries,
+    attempt: attempt,
+  );
 
   group('Envelope round trip', () {
     test('keeps every field', () {
@@ -38,8 +37,11 @@ void main() {
       expect(after.id, before.id);
       expect(after.queue, 'mail');
       expect(after.maxRetries, 7);
-      expect(after.attempt, 2,
-          reason: 'the retry count decides when to give up');
+      expect(
+        after.attempt,
+        2,
+        reason: 'the retry count decides when to give up',
+      );
       expect(after.task.type, before.task.type);
       expect(after.task.payload, before.task.payload);
     });
@@ -51,7 +53,7 @@ void main() {
       final payload = <String, dynamic>{
         'user': {
           'name': 'Ada Lovelace',
-          'tags': ['first', 'analytical']
+          'tags': ['first', 'analytical'],
         },
         'amount': 12.5,
         'note': 'yazı — düz metin, emoji dahil 🧮',
@@ -93,7 +95,9 @@ void main() {
 
       final dead = DeadLetter.decode(
         envelope.encodeDead(
-            'Exception: smtp refused', at.millisecondsSinceEpoch),
+          'Exception: smtp refused',
+          at.millisecondsSinceEpoch,
+        ),
       );
 
       expect(dead.id, 'task-9');
@@ -143,8 +147,11 @@ void main() {
         final dead = DeadLetter.decode(oldFormat());
 
         expect(dead.error, '', reason: 'no error was stored back then');
-        expect(dead.deadAt, isNull,
-            reason: 'null says "unknown"; an epoch date would say 1970');
+        expect(
+          dead.deadAt,
+          isNull,
+          reason: 'null says "unknown"; an epoch date would say 1970',
+        );
       });
 
       test('is told apart from the new format by the envelope key', () {

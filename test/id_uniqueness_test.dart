@@ -53,8 +53,11 @@ void main() {
     expect(ids, hasLength(clientCount * perClient));
     // The whole point: no two tasks share an id, so none is silently taken for
     // a duplicate of another.
-    expect(ids.toSet(), hasLength(ids.length),
-        reason: 'every task id must be unique across all clients');
+    expect(
+      ids.toSet(),
+      hasLength(ids.length),
+      reason: 'every task id must be unique across all clients',
+    );
   });
 
   test('a single client mints distinct, ordered ids', () async {

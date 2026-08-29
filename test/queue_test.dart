@@ -50,7 +50,10 @@ void main() {
 
   test('a valid task runs in the worker', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     final worker = await Worker.connect(
       workerId: 'w1',
       host: redisHost,
@@ -61,7 +64,9 @@ void main() {
 
     final ran = Completer<String>();
     worker.handle(
-        'greet', (task, _) => ran.complete(task.payload['name'] as String));
+      'greet',
+      (task, _) => ran.complete(task.payload['name'] as String),
+    );
     final loop = worker.run();
 
     await client.enqueue(Task('greet', {'name': 'jane'}));
@@ -73,146 +78,171 @@ void main() {
     await worker.close();
   });
 
-  test('a failed task waits in the delayed set, not pending, before retry',
-      () async {
-    final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
-    // A long base backoff so the task stays in the delayed set long enough to
-    // observe it there (the mover won't promote it for a minute).
-    final worker = await Worker.connect(
-      workerId: 'w2',
-      host: redisHost,
-      port: redisPort,
-      prefix: _prefix,
-      queues: {'default': 1},
-      backoffBase: const Duration(seconds: 60),
-      backoffJitter: 0,
-    );
+  test(
+    'a failed task waits in the delayed set, not pending, before retry',
+    () async {
+      final client = await QueueClient.connect(
+        host: redisHost,
+        port: redisPort,
+        prefix: _prefix,
+      );
+      // A long base backoff so the task stays in the delayed set long enough to
+      // observe it there (the mover won't promote it for a minute).
+      final worker = await Worker.connect(
+        workerId: 'w2',
+        host: redisHost,
+        port: redisPort,
+        prefix: _prefix,
+        queues: {'default': 1},
+        backoffBase: const Duration(seconds: 60),
+        backoffJitter: 0,
+      );
 
-    worker.handle('boom', (_, __) => throw StateError('always fails'));
-    final loop = worker.run();
+      worker.handle('boom', (_, __) => throw StateError('always fails'));
+      final loop = worker.run();
 
-    await client.enqueue(Task('boom', {}), maxRetries: 5);
+      await client.enqueue(Task('boom', {}), maxRetries: 5);
 
-    final inspect = await _connect();
-    // Wait until the worker has processed the task once and parked it in the
-    // delayed set.
-    final landed = await _pollUntil(() async {
-      final n = await inspect.send_object(['ZCARD', _delayedKey('default')]);
-      return (n as int) == 1;
-    });
-    expect(landed, isTrue,
-        reason: 'failed task should land in the delayed set');
+      final inspect = await _connect();
+      // Wait until the worker has processed the task once and parked it in the
+      // delayed set.
+      final landed = await _pollUntil(() async {
+        final n = await inspect.send_object(['ZCARD', _delayedKey('default')]);
+        return (n as int) == 1;
+      });
+      expect(
+        landed,
+        isTrue,
+        reason: 'failed task should land in the delayed set',
+      );
 
-    // It must NOT be back on the pending list yet.
-    final pending =
-        await inspect.send_object(['LLEN', _pendingKey('default')]) as int;
-    expect(pending, 0, reason: 'a backed-off retry must not be pending yet');
+      // It must NOT be back on the pending list yet.
+      final pending =
+          await inspect.send_object(['LLEN', _pendingKey('default')]) as int;
+      expect(pending, 0, reason: 'a backed-off retry must not be pending yet');
 
-    // ...and its score must be in the future (the backoff hasn't elapsed).
-    final withScores = await inspect.send_object(
-      ['ZRANGE', _delayedKey('default'), '0', '-1', 'WITHSCORES'],
-    ) as List;
-    final score = int.parse(withScores[1] as String);
-    expect(
-      score,
-      greaterThan(DateTime.now().millisecondsSinceEpoch),
-      reason: 'the delayed task should be scheduled for the future',
-    );
+      // ...and its score must be in the future (the backoff hasn't elapsed).
+      final withScores = await inspect.send_object([
+        'ZRANGE',
+        _delayedKey('default'),
+        '0',
+        '-1',
+        'WITHSCORES',
+      ]) as List;
+      final score = int.parse(withScores[1] as String);
+      expect(
+        score,
+        greaterThan(DateTime.now().millisecondsSinceEpoch),
+        reason: 'the delayed task should be scheduled for the future',
+      );
 
-    worker.stop();
-    await loop.timeout(const Duration(seconds: 3));
-    await inspect.get_connection().close();
-    await client.close();
-    await worker.close();
-  });
+      worker.stop();
+      await loop.timeout(const Duration(seconds: 3));
+      await inspect.get_connection().close();
+      await client.close();
+      await worker.close();
+    },
+  );
 
-  test('the due-mover promotes a delayed task and the worker reprocesses it',
-      () async {
-    final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
-    // Small base so the backoff elapses quickly and the test stays fast.
-    final worker = await Worker.connect(
-      workerId: 'w3',
-      host: redisHost,
-      port: redisPort,
-      prefix: _prefix,
-      queues: {'default': 1},
-      backoffBase: const Duration(milliseconds: 50),
-      backoffJitter: 0,
-    );
+  test(
+    'the due-mover promotes a delayed task and the worker reprocesses it',
+    () async {
+      final client = await QueueClient.connect(
+        host: redisHost,
+        port: redisPort,
+        prefix: _prefix,
+      );
+      // Small base so the backoff elapses quickly and the test stays fast.
+      final worker = await Worker.connect(
+        workerId: 'w3',
+        host: redisHost,
+        port: redisPort,
+        prefix: _prefix,
+        queues: {'default': 1},
+        backoffBase: const Duration(milliseconds: 50),
+        backoffJitter: 0,
+      );
 
-    var attempts = 0;
-    final succeeded = Completer<void>();
-    worker.handle('flaky', (_, __) {
-      attempts++;
-      if (attempts == 1) throw StateError('fails once');
-      succeeded.complete(); // second run succeeds
-    });
-    final loop = worker.run();
+      var attempts = 0;
+      final succeeded = Completer<void>();
+      worker.handle('flaky', (_, __) {
+        attempts++;
+        if (attempts == 1) throw StateError('fails once');
+        succeeded.complete(); // second run succeeds
+      });
+      final loop = worker.run();
 
-    await client.enqueue(Task('flaky', {}), maxRetries: 5);
+      await client.enqueue(Task('flaky', {}), maxRetries: 5);
 
-    // The first run fails, the task waits out its backoff in the delayed set,
-    // the mover promotes it, and the second run succeeds.
-    await succeeded.future.timeout(const Duration(seconds: 8));
-    expect(attempts, 2, reason: 'task should be reprocessed exactly once');
+      // The first run fails, the task waits out its backoff in the delayed set,
+      // the mover promotes it, and the second run succeeds.
+      await succeeded.future.timeout(const Duration(seconds: 8));
+      expect(attempts, 2, reason: 'task should be reprocessed exactly once');
 
-    worker.stop();
-    await loop.timeout(const Duration(seconds: 3));
-    await client.close();
-    await worker.close();
-  });
+      worker.stop();
+      await loop.timeout(const Duration(seconds: 3));
+      await client.close();
+      await worker.close();
+    },
+  );
 
-  test('a failing task lands in the dead-letter list after maxRetries',
-      () async {
-    final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
-    // Small base keeps the two backed-off retries fast and deterministic.
-    final worker = await Worker.connect(
-      workerId: 'w4',
-      host: redisHost,
-      port: redisPort,
-      prefix: _prefix,
-      queues: {'default': 1},
-      backoffBase: const Duration(milliseconds: 30),
-      backoffJitter: 0,
-    );
+  test(
+    'a failing task lands in the dead-letter list after maxRetries',
+    () async {
+      final client = await QueueClient.connect(
+        host: redisHost,
+        port: redisPort,
+        prefix: _prefix,
+      );
+      // Small base keeps the two backed-off retries fast and deterministic.
+      final worker = await Worker.connect(
+        workerId: 'w4',
+        host: redisHost,
+        port: redisPort,
+        prefix: _prefix,
+        queues: {'default': 1},
+        backoffBase: const Duration(milliseconds: 30),
+        backoffJitter: 0,
+      );
 
-    var attempts = 0;
-    worker.handle('boom', (_, __) {
-      attempts++;
-      throw StateError('always fails');
-    });
-    final loop = worker.run();
+      var attempts = 0;
+      worker.handle('boom', (_, __) {
+        attempts++;
+        throw StateError('always fails');
+      });
+      final loop = worker.run();
 
-    await client.enqueue(Task('boom', {}), maxRetries: 2);
+      await client.enqueue(Task('boom', {}), maxRetries: 2);
 
-    // Poll the dead-letter list until the envelope shows up.
-    final inspect = await _connect();
-    String? dead;
-    await _pollUntil(
-      () async {
+      // Poll the dead-letter list until the envelope shows up.
+      final inspect = await _connect();
+      String? dead;
+      await _pollUntil(() async {
         dead = await inspect.send_object(['RPOP', _deadKey]) as String?;
         return dead != null;
-      },
-      timeout: const Duration(seconds: 10),
-    );
+      }, timeout: const Duration(seconds: 10));
 
-    expect(dead, isNotNull,
-        reason: 'envelope should reach the dead-letter list');
-    expect(attempts, greaterThanOrEqualTo(3)); // initial + 2 retries
+      expect(
+        dead,
+        isNotNull,
+        reason: 'envelope should reach the dead-letter list',
+      );
+      expect(attempts, greaterThanOrEqualTo(3)); // initial + 2 retries
 
-    worker.stop();
-    await loop.timeout(const Duration(seconds: 3));
-    await inspect.get_connection().close();
-    await client.close();
-    await worker.close();
-  });
+      worker.stop();
+      await loop.timeout(const Duration(seconds: 3));
+      await inspect.get_connection().close();
+      await client.close();
+      await worker.close();
+    },
+  );
 
   test('a scheduled task waits in the delayed set, not pending', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
 
     // Far enough out that nothing could promote it during the test. No worker
     // is needed: enqueue alone must place it correctly.
@@ -224,17 +254,24 @@ void main() {
     final inspect = await _connect();
     final delayed =
         await inspect.send_object(['ZCARD', _delayedKey('default')]) as int;
-    expect(delayed, 1,
-        reason: 'a scheduled task should sit in the delayed set');
+    expect(
+      delayed,
+      1,
+      reason: 'a scheduled task should sit in the delayed set',
+    );
 
     final pending =
         await inspect.send_object(['LLEN', _pendingKey('default')]) as int;
     expect(pending, 0, reason: 'a scheduled task must not be pending yet');
 
     // ...and its score must be the future due time.
-    final withScores = await inspect.send_object(
-      ['ZRANGE', _delayedKey('default'), '0', '-1', 'WITHSCORES'],
-    ) as List;
+    final withScores = await inspect.send_object([
+      'ZRANGE',
+      _delayedKey('default'),
+      '0',
+      '-1',
+      'WITHSCORES',
+    ]) as List;
     final score = int.parse(withScores[1] as String);
     expect(
       score,
@@ -248,7 +285,10 @@ void main() {
 
   test('a scheduled task runs once its time comes, not before', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     final worker = await Worker.connect(
       workerId: 'w5',
       host: redisHost,
@@ -286,7 +326,10 @@ void main() {
 
   test('a processAt in the past runs promptly', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     final worker = await Worker.connect(
       workerId: 'w6',
       host: redisHost,
@@ -314,10 +357,12 @@ void main() {
     await worker.close();
   });
 
-  test('onError fires on each failure and onDeadLetter fires terminally',
-      () async {
+  test('onError fires on each failure and onDeadLetter fires terminally', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     final errors = <({int attempt, bool willRetry, Object error, String id})>[];
     final deadLettered = Completer<Task>();
     String? deadLetteredId;
@@ -370,10 +415,12 @@ void main() {
     await worker.close();
   });
 
-  test('the worker gives each queue first look in proportion to its weight',
-      () async {
+  test('the worker gives each queue first look in proportion to its weight', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     // Weights 3:2:1. Enqueue exactly the weight count to each queue, all up
     // front, so one full weighted cycle drains them and the lead order is
     // deterministic.
@@ -422,7 +469,10 @@ void main() {
 
   test('a throwing observer callback does not break the worker', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     // onError itself throws; the task must still reach the dead-letter list,
     // proving the callback is isolated from the processing path.
     final worker = await Worker.connect(
@@ -445,8 +495,11 @@ void main() {
       () async => (await inspect.send_object(['LLEN', _deadKey]) as int) == 1,
       timeout: const Duration(seconds: 10),
     );
-    expect(reached, isTrue,
-        reason: 'task must dead-letter even though onError threw');
+    expect(
+      reached,
+      isTrue,
+      reason: 'task must dead-letter even though onError threw',
+    );
 
     worker.stop();
     await loop.timeout(const Duration(seconds: 3));

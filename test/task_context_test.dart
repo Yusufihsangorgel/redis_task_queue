@@ -22,25 +22,27 @@ Future<void> _flush() async {
 }
 
 Future<Worker> _worker() => Worker.connect(
-      host: redisHost,
-      port: redisPort,
-      prefix: _prefix,
-      queues: {'default': 1},
-      workerId: _workerId,
-      // Retries are the subject here, so don't spend real backoff waiting.
-      backoffBase: const Duration(milliseconds: 5),
-      backoffCap: const Duration(milliseconds: 20),
-    );
+  host: redisHost,
+  port: redisPort,
+  prefix: _prefix,
+  queues: {'default': 1},
+  workerId: _workerId,
+  // Retries are the subject here, so don't spend real backoff waiting.
+  backoffBase: const Duration(milliseconds: 5),
+  backoffCap: const Duration(milliseconds: 20),
+);
 
 void main() {
   requireRedis();
 
   setUp(_flush);
 
-  test('the handler sees the id enqueue returned, unchanged across retries',
-      () async {
+  test('the handler sees the id enqueue returned, unchanged across retries', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     final worker = await _worker();
     final seen = <TaskContext>[];
     final done = Completer<void>();
@@ -70,7 +72,10 @@ void main() {
 
   test('maxAttempts is the first run plus its retries', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     final worker = await _worker();
     final seen = Completer<TaskContext>();
 
@@ -90,47 +95,55 @@ void main() {
     await client.close();
   });
 
-  test('isLastAttempt is true on exactly the run whose failure dead-letters',
-      () async {
-    final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
-    final worker = await _worker();
-    final flags = <bool>[];
-    final deadLettered = Completer<void>();
-    final workerWithHook = worker;
+  test(
+    'isLastAttempt is true on exactly the run whose failure dead-letters',
+    () async {
+      final client = await QueueClient.connect(
+        host: redisHost,
+        port: redisPort,
+        prefix: _prefix,
+      );
+      final worker = await _worker();
+      final flags = <bool>[];
+      final deadLettered = Completer<void>();
+      final workerWithHook = worker;
 
-    workerWithHook.handle('doomed', (task, context) {
-      flags.add(context.isLastAttempt);
-      throw StateError('always fails');
-    });
-    final loop = workerWithHook.run();
+      workerWithHook.handle('doomed', (task, context) {
+        flags.add(context.isLastAttempt);
+        throw StateError('always fails');
+      });
+      final loop = workerWithHook.run();
 
-    // maxRetries: 2 means three runs in all, and the third is the one whose
-    // failure gives up. Anything else here is an off-by-one that would have a
-    // last-ditch handler either never fire or fire while a retry is still
-    // coming.
-    await client.enqueue(Task('doomed', {}), maxRetries: 2);
+      // maxRetries: 2 means three runs in all, and the third is the one whose
+      // failure gives up. Anything else here is an off-by-one that would have a
+      // last-ditch handler either never fire or fire while a retry is still
+      // coming.
+      await client.enqueue(Task('doomed', {}), maxRetries: 2);
 
-    final conn = RedisConnection();
-    final cmd = await conn.connect(redisHost, redisPort);
-    final deadline = DateTime.now().add(const Duration(seconds: 10));
-    while (DateTime.now().isBefore(deadline)) {
-      final len = await cmd.send_object(['LLEN', '$_prefix:dead']) as int;
-      if (len == 1) {
-        deadLettered.complete();
-        break;
+      final conn = RedisConnection();
+      final cmd = await conn.connect(redisHost, redisPort);
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while (DateTime.now().isBefore(deadline)) {
+        final len = await cmd.send_object(['LLEN', '$_prefix:dead']) as int;
+        if (len == 1) {
+          deadLettered.complete();
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 25));
       }
-      await Future<void>.delayed(const Duration(milliseconds: 25));
-    }
-    await cmd.get_connection().close();
+      await cmd.get_connection().close();
 
-    expect(deadLettered.isCompleted, isTrue,
-        reason: 'the task never reached the dead-letter list');
-    expect(flags, [false, false, true]);
+      expect(
+        deadLettered.isCompleted,
+        isTrue,
+        reason: 'the task never reached the dead-letter list',
+      );
+      expect(flags, [false, false, true]);
 
-    workerWithHook.stop();
-    await loop;
-    await workerWithHook.close();
-    await client.close();
-  });
+      workerWithHook.stop();
+      await loop;
+      await workerWithHook.close();
+      await client.close();
+    },
+  );
 }

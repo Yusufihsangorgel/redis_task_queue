@@ -92,8 +92,10 @@ Future<void> main() async {
     // here too, so a page can name the job somebody has to go and find.
     onDeadLetter: (task, context, error, stackTrace) {
       gaveUp++;
-      print('   gave up on ${task.payload['customer']} after '
-          '${context.attempt} attempts');
+      print(
+        '   gave up on ${task.payload['customer']} after '
+        '${context.attempt} attempts',
+      );
       if (gaveUp == 3 && !allDead.isCompleted) allDead.complete();
     },
   );
@@ -125,14 +127,17 @@ Future<void> main() async {
     // envelope with no failure attached. Anything this worker writes has both.
     // It comes back as a local DateTime, so it prints without a zone suffix.
     final at = dead.deadAt?.toIso8601String() ?? 'unknown (pre-0.8.0 entry)';
-    print('   ${(dead.task.payload['customer'] as String).padRight(8)} '
-        '${dead.id}');
+    print(
+      '   ${(dead.task.payload['customer'] as String).padRight(8)} '
+      '${dead.id}',
+    );
     print('      ${dead.attempts} attempts, died $at');
     print('      ${dead.error}');
   }
 
   print(
-      '\n3. two of those are 410 Gone: the endpoint is deleted, so replaying');
+    '\n3. two of those are 410 Gone: the endpoint is deleted, so replaying',
+  );
   print('   them is a round trip back to this list. The third is our own');
   print('   missing config. Fix that, then put the one task back.');
   _signingKeys['initech'] = 'key-3';
@@ -171,8 +176,10 @@ Future<void> main() async {
   print('   purgeDeadLetters -> ${await client.purgeDeadLetters()} entries');
   await _depth(client, 'purged');
 
-  print('\nwhat never succeeds is not lost. It is parked where a human can '
-      'read it,\nand putting one back is one call.');
+  print(
+    '\nwhat never succeeds is not lost. It is parked where a human can '
+    'read it,\nand putting one back is one call.',
+  );
   await client.close();
 }
 
@@ -227,9 +234,11 @@ Future<Worker> _worker({TaskDeadLetterCallback? onDeadLetter}) =>
 /// See [QueueStats] for what the four numbers mean.
 Future<void> _depth(QueueClient client, String label) async {
   final depth = await client.stats(queues: const [_queue]);
-  print('   [$label] pending ${depth.totalPending} · '
-      'delayed ${depth.totalDelayed} · in flight ${depth.inFlight} · '
-      'dead ${depth.deadLetter}');
+  print(
+    '   [$label] pending ${depth.totalPending} · '
+    'delayed ${depth.totalDelayed} · in flight ${depth.inFlight} · '
+    'dead ${depth.deadLetter}',
+  );
 }
 
 /// Deletes this demo's keys so a re-run starts where a first run does.
@@ -243,9 +252,14 @@ Future<void> _clearDemoKeys() async {
   final keys = <String>[];
   var cursor = '0';
   do {
-    final page = await redis.send_object(
-      ['SCAN', cursor, 'MATCH', '$_prefix:*', 'COUNT', '100'],
-    ) as List;
+    final page = await redis.send_object([
+      'SCAN',
+      cursor,
+      'MATCH',
+      '$_prefix:*',
+      'COUNT',
+      '100',
+    ]) as List;
     cursor = page[0] as String;
     keys.addAll((page[1] as List).cast<String>());
   } while (cursor != '0');

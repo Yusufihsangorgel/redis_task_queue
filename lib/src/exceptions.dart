@@ -55,15 +55,15 @@ final class TaskQueueServerException extends TaskQueueException {
 TaskQueueException wrapRedisError(Object error, String operation) =>
     switch (error) {
       RedisError() => TaskQueueServerException(
-          '$operation failed: Redis returned an error',
-          cause: error,
-        ),
+        '$operation failed: Redis returned an error',
+        cause: error,
+      ),
       RedisRuntimeError() => TaskQueueServerException(
-          '$operation failed: the Redis reply could not be parsed',
-          cause: error,
-        ),
+        '$operation failed: the Redis reply could not be parsed',
+        cause: error,
+      ),
       _ => TaskQueueConnectionException(
-          '$operation failed: the connection to Redis is unusable',
-          cause: error,
-        ),
+        '$operation failed: the connection to Redis is unusable',
+        cause: error,
+      ),
     };

@@ -104,31 +104,33 @@ void main() {
 
   setUp(_flush);
 
-  test('QueueClient.enqueue recovers after its connection is severed',
-      () async {
-    final proxy = await _Proxy.start();
-    final client = await QueueClient.connect(
-      host: 'localhost',
-      port: proxy.port,
-      prefix: _prefix,
-    );
+  test(
+    'QueueClient.enqueue recovers after its connection is severed',
+    () async {
+      final proxy = await _Proxy.start();
+      final client = await QueueClient.connect(
+        host: 'localhost',
+        port: proxy.port,
+        prefix: _prefix,
+      );
 
-    // Baseline: the client works before anything is severed.
-    final id1 = await client.enqueue(Task('probe', {'n': 1}));
-    expect(id1, isNotEmpty);
+      // Baseline: the client works before anything is severed.
+      final id1 = await client.enqueue(Task('probe', {'n': 1}));
+      expect(id1, isNotEmpty);
 
-    // Sever the connection. README.md recommends keeping one client around
-    // for the app's lifetime and reusing it; that reused client must recover
-    // on its own rather than fail every call from here on.
-    proxy.sever();
+      // Sever the connection. README.md recommends keeping one client around
+      // for the app's lifetime and reusing it; that reused client must recover
+      // on its own rather than fail every call from here on.
+      proxy.sever();
 
-    final id2 = await client.enqueue(Task('probe', {'n': 2}));
-    expect(id2, isNotEmpty);
-    expect(id2, isNot(id1));
+      final id2 = await client.enqueue(Task('probe', {'n': 2}));
+      expect(id2, isNotEmpty);
+      expect(id2, isNot(id1));
 
-    await client.close();
-    await proxy.stop();
-  });
+      await client.close();
+      await proxy.stop();
+    },
+  );
 
   test('Worker.run() survives its connection being severed mid-loop', () async {
     final proxy = await _Proxy.start();
@@ -156,9 +158,13 @@ void main() {
 
     await client.enqueue(Task('probe', {'n': 1}));
     final gotFirst = await _pollUntil(() => processed.contains(1));
-    expect(gotFirst, isTrue,
-        reason: 'baseline: the worker must process a task before its '
-            'connection is severed');
+    expect(
+      gotFirst,
+      isTrue,
+      reason:
+          'baseline: the worker must process a task before its '
+          'connection is severed',
+    );
 
     // Sever both connections at once, the same way a real Redis restart or
     // failover would drop every client simultaneously, not just one. Before
@@ -175,9 +181,13 @@ void main() {
       () => processed.contains(2),
       timeout: const Duration(seconds: 5),
     );
-    expect(gotSecond, isTrue,
-        reason: 'the worker must keep processing after its connection is '
-            'severed, not die or get stuck');
+    expect(
+      gotSecond,
+      isTrue,
+      reason:
+          'the worker must keep processing after its connection is '
+          'severed, not die or get stuck',
+    );
 
     worker.stop();
     // If run() had died from the severed connection, awaiting it here

@@ -22,7 +22,10 @@ void main() {
 
   test('awaiting stop() drains the in-flight task before returning', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     final worker = await Worker.connect(
       workerId: 'w1',
       host: redisHost,

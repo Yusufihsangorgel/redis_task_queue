@@ -46,11 +46,12 @@ void main() {
 
   setUp(_flush);
 
-  test(
-      'a running task is held on the in-flight list, not lost, until it finishes',
-      () async {
+  test('a running task is held on the in-flight list, not lost, until it finishes', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     final worker = await Worker.connect(
       host: redisHost,
       port: redisPort,
@@ -77,8 +78,11 @@ void main() {
     final inflight = await inspect.send_object(['LLEN', _inFlightKey()]) as int;
     final pending =
         await inspect.send_object(['LLEN', _pendingKey('default')]) as int;
-    expect(inflight, 1,
-        reason: 'the running task must be held on the in-flight list');
+    expect(
+      inflight,
+      1,
+      reason: 'the running task must be held on the in-flight list',
+    );
     expect(pending, 0, reason: 'it must be off the pending list while it runs');
 
     // Once it finishes, the in-flight list drains.
@@ -87,8 +91,11 @@ void main() {
       () async =>
           (await inspect.send_object(['LLEN', _inFlightKey()]) as int) == 0,
     );
-    expect(drained, isTrue,
-        reason: 'a finished task must leave the in-flight list');
+    expect(
+      drained,
+      isTrue,
+      reason: 'a finished task must leave the in-flight list',
+    );
 
     worker.stop();
     await loop.timeout(const Duration(seconds: 3));
@@ -97,8 +104,7 @@ void main() {
     await worker.close();
   });
 
-  test('a worker recovers tasks a previous run left in flight when it died',
-      () async {
+  test('a worker recovers tasks a previous run left in flight when it died', () async {
     // Stand in for a worker that claimed a task and died before finishing it:
     // seed the in-flight list with an envelope, exactly as an interrupted claim
     // would have left it.
@@ -127,11 +133,16 @@ void main() {
     );
     final ran = Completer<int>();
     worker.handle(
-        'resume', (task, _) => ran.complete(task.payload['n'] as int));
+      'resume',
+      (task, _) => ran.complete(task.payload['n'] as int),
+    );
     final loop = worker.run();
 
-    expect(await ran.future.timeout(const Duration(seconds: 5)), 7,
-        reason: 'the orphaned task must be recovered and run');
+    expect(
+      await ran.future.timeout(const Duration(seconds: 5)),
+      7,
+      reason: 'the orphaned task must be recovered and run',
+    );
 
     // The in-flight list is clean once the recovered task completes.
     final inspect = await _connect();
@@ -147,8 +158,7 @@ void main() {
     await worker.close();
   });
 
-  test('another worker\'s in-flight list is left untouched during recovery',
-      () async {
+  test('another worker\'s in-flight list is left untouched during recovery', () async {
     // A live peer with a different id is mid-task: its in-flight list must not
     // be reclaimed by this worker's startup recovery.
     final seed = await _connect();
@@ -176,8 +186,11 @@ void main() {
     // still exactly where it was.
     await Future<void>.delayed(const Duration(milliseconds: 500));
     final stillThere = await seed.send_object(['LLEN', peerKey]) as int;
-    expect(stillThere, 1,
-        reason: "a peer worker's in-flight task must not be recovered");
+    expect(
+      stillThere,
+      1,
+      reason: "a peer worker's in-flight task must not be recovered",
+    );
 
     worker.stop();
     await loop.timeout(const Duration(seconds: 3));

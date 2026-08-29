@@ -35,8 +35,10 @@ Future<void> chargeOnce(Task task, TaskContext context) async {
 }
 
 void describe(TaskContext context) {
-  print('  attempt ${context.attempt} of ${context.maxAttempts}'
-      '${context.isLastAttempt ? '  <- last one' : ''}');
+  print(
+    '  attempt ${context.attempt} of ${context.maxAttempts}'
+    '${context.isLastAttempt ? '  <- last one' : ''}',
+  );
   print('      id ${context.id} (the same on every attempt)');
 }
 

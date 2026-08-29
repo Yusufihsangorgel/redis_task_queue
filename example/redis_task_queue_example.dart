@@ -25,9 +25,11 @@ Future<void> main(List<String> args) async {
       // `context.id` is the same on every attempt, so it is what to record
       // against the effect to keep a repeat from sending the mail twice. See
       // at_least_once.dart for why a repeat is not hypothetical.
-      print('attempt ${context.attempt} of ${context.maxAttempts}: '
-          'sending welcome email for user ${task.payload['user_id']} '
-          '(task ${context.id})');
+      print(
+        'attempt ${context.attempt} of ${context.maxAttempts}: '
+        'sending welcome email for user ${task.payload['user_id']} '
+        '(task ${context.id})',
+      );
     });
     print('worker running (Ctrl-C to stop)');
     await worker.run();

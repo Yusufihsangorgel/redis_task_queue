@@ -15,7 +15,7 @@ import 'task.dart';
 /// or failover doesn't permanently break a client that survives it.
 final class QueueClient {
   QueueClient._(this._command, this._keys, this._host, this._port)
-      : _idPrefix = _randomPrefix();
+    : _idPrefix = _randomPrefix();
 
   Command _command;
   final Keys _keys;
@@ -85,7 +85,9 @@ final class QueueClient {
         return await _command.send_object(command);
       } on Object catch (e, s) {
         Error.throwWithStackTrace(
-            wrapRedisError(e, command.first as String), s);
+          wrapRedisError(e, command.first as String),
+          s,
+        );
       }
     }
   }
@@ -123,9 +125,7 @@ final class QueueClient {
       processIn: processIn,
       now: DateTime.now(),
     );
-    await _send(
-      ['ZADD', _keys.delayed(queue), '$dueAt', env.encode()],
-    );
+    await _send(['ZADD', _keys.delayed(queue), '$dueAt', env.encode()]);
     return id;
   }
 
@@ -138,9 +138,12 @@ final class QueueClient {
     if (limit < 1) {
       throw ArgumentError.value(limit, 'limit', 'must be at least 1');
     }
-    final raw = await _send(
-      ['LRANGE', _keys.deadLetter(), '0', '${limit - 1}'],
-    ) as List;
+    final raw = await _send([
+      'LRANGE',
+      _keys.deadLetter(),
+      '0',
+      '${limit - 1}',
+    ]) as List;
     return [for (final entry in raw) DeadLetter.decode(entry as String)];
   }
 
@@ -154,9 +157,7 @@ final class QueueClient {
   /// made the task fail; replaying an unfixed task just sends it back to the
   /// dead-letter list.
   Future<bool> replayDeadLetter(String id) async {
-    final raw = await _send(
-      ['LRANGE', _keys.deadLetter(), '0', '-1'],
-    ) as List;
+    final raw = await _send(['LRANGE', _keys.deadLetter(), '0', '-1']) as List;
     for (final entry in raw.cast<String>()) {
       final dead = DeadLetter.decode(entry);
       if (dead.id != id) continue;
@@ -250,9 +251,11 @@ return 0
     final names = <String>{};
     for (final key in await _scanKeys('$queuePrefix*')) {
       final rest = key.substring(queuePrefix.length);
-      names.add(rest.endsWith(delayedSuffix)
-          ? rest.substring(0, rest.length - delayedSuffix.length)
-          : rest);
+      names.add(
+        rest.endsWith(delayedSuffix)
+            ? rest.substring(0, rest.length - delayedSuffix.length)
+            : rest,
+      );
     }
     return names;
   }
@@ -263,9 +266,14 @@ return 0
     final keys = <String>[];
     var cursor = '0';
     do {
-      final result = await _send(
-        ['SCAN', cursor, 'MATCH', pattern, 'COUNT', '100'],
-      ) as List;
+      final result = await _send([
+        'SCAN',
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        '100',
+      ]) as List;
       cursor = result[0] as String;
       keys.addAll((result[1] as List).cast<String>());
     } while (cursor != '0');

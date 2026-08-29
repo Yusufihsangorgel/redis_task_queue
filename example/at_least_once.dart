@@ -43,8 +43,9 @@ Future<void> main(List<String> args) async {
 }
 
 Future<void> _round({required bool dedup}) async {
-  final label =
-      dedup ? 'a handler keyed off the task id' : 'a handler with no defence';
+  final label = dedup
+      ? 'a handler keyed off the task id'
+      : 'a handler with no defence';
   print('== $label ==');
 
   _ledger().writeAsStringSync('');
@@ -82,8 +83,10 @@ Future<void> _round({required bool dedup}) async {
   await worker.close();
 
   final charges = _ledger().readAsLinesSync().where((l) => l.isNotEmpty).length;
-  print('   the task ran twice, and the invoice was charged $charges time'
-      '${charges == 1 ? '' : 's'}\n');
+  print(
+    '   the task ran twice, and the invoice was charged $charges time'
+    '${charges == 1 ? '' : 's'}\n',
+  );
 
   await redis.get_connection().close();
   await client.close();

@@ -35,39 +35,47 @@ void main() {
 
   setUp(_flush);
 
-  test('counts pending and delayed per queue, before any worker runs',
-      () async {
-    final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
-    try {
-      await client.enqueue(Task('a', {}), queue: 'high');
-      await client.enqueue(Task('b', {}), queue: 'high');
-      await client.enqueue(Task('c', {}), queue: 'low');
-      // A scheduled task goes to the delayed set, not pending.
-      await client.enqueue(
-        Task('later', {}),
-        queue: 'high',
-        processIn: const Duration(minutes: 5),
+  test(
+    'counts pending and delayed per queue, before any worker runs',
+    () async {
+      final client = await QueueClient.connect(
+        host: redisHost,
+        port: redisPort,
+        prefix: _prefix,
       );
+      try {
+        await client.enqueue(Task('a', {}), queue: 'high');
+        await client.enqueue(Task('b', {}), queue: 'high');
+        await client.enqueue(Task('c', {}), queue: 'low');
+        // A scheduled task goes to the delayed set, not pending.
+        await client.enqueue(
+          Task('later', {}),
+          queue: 'high',
+          processIn: const Duration(minutes: 5),
+        );
 
-      // Discovery finds both queues.
-      final stats = await client.stats();
-      expect(stats.pending['high'], 2);
-      expect(stats.pending['low'], 1);
-      expect(stats.delayed['high'], 1);
-      expect(stats.delayed['low'], 0);
-      expect(stats.totalPending, 3);
-      expect(stats.totalDelayed, 1);
-      expect(stats.deadLetter, 0);
-      expect(stats.inFlight, 0);
-    } finally {
-      await client.close();
-    }
-  });
+        // Discovery finds both queues.
+        final stats = await client.stats();
+        expect(stats.pending['high'], 2);
+        expect(stats.pending['low'], 1);
+        expect(stats.delayed['high'], 1);
+        expect(stats.delayed['low'], 0);
+        expect(stats.totalPending, 3);
+        expect(stats.totalDelayed, 1);
+        expect(stats.deadLetter, 0);
+        expect(stats.inFlight, 0);
+      } finally {
+        await client.close();
+      }
+    },
+  );
 
   test('an explicit queue list counts exactly those, with no scan', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     try {
       await client.enqueue(Task('a', {}), queue: 'orders');
 
@@ -83,7 +91,10 @@ void main() {
 
   test('reflects in-flight and dead-letter depth', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     // A worker that blocks on the task so it stays in flight while we look.
     final holding = Completer<void>();
     final release = Completer<void>();
@@ -134,7 +145,10 @@ void main() {
 
   test('rejects an out-of-range limit on deadLetters', () async {
     final client = await QueueClient.connect(
-        host: redisHost, port: redisPort, prefix: _prefix);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+    );
     expect(() => client.deadLetters(limit: 0), throwsArgumentError);
     await client.close();
   });
