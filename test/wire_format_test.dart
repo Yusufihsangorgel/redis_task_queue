@@ -21,13 +21,14 @@ void main() {
     String queue = 'default',
     int maxRetries = 3,
     int attempt = 0,
-  }) => Envelope(
-    id: id,
-    task: Task(type, payload ?? {'to': 'someone@example.com'}),
-    queue: queue,
-    maxRetries: maxRetries,
-    attempt: attempt,
-  );
+  }) =>
+      Envelope(
+        id: id,
+        task: Task(type, payload ?? {'to': 'someone@example.com'}),
+        queue: queue,
+        maxRetries: maxRetries,
+        attempt: attempt,
+      );
 
   group('Envelope round trip', () {
     test('keeps every field', () {

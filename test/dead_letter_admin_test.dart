@@ -19,14 +19,14 @@ Future<void> _flush() async {
 }
 
 Future<Worker> _worker({int weight = 1}) => Worker.connect(
-  workerId: 'w1',
-  host: redisHost,
-  port: redisPort,
-  prefix: _prefix,
-  queues: {'default': weight},
-  backoffBase: const Duration(milliseconds: 5),
-  backoffCap: const Duration(milliseconds: 20),
-);
+      workerId: 'w1',
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+      queues: {'default': weight},
+      backoffBase: const Duration(milliseconds: 5),
+      backoffCap: const Duration(milliseconds: 20),
+    );
 
 Future<bool> _pollUntil(
   FutureOr<bool> Function() check, {

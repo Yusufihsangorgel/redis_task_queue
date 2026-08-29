@@ -15,7 +15,7 @@ import 'task.dart';
 /// or failover doesn't permanently break a client that survives it.
 final class QueueClient {
   QueueClient._(this._command, this._keys, this._host, this._port)
-    : _idPrefix = _randomPrefix();
+      : _idPrefix = _randomPrefix();
 
   Command _command;
   final Keys _keys;

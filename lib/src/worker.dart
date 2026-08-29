@@ -76,11 +76,11 @@ final class Worker {
     required double backoffJitter,
     TaskErrorCallback? onError,
     TaskDeadLetterCallback? onDeadLetter,
-  }) : _backoffBase = backoffBase,
-       _backoffCap = backoffCap,
-       _backoffJitter = backoffJitter,
-       _onError = onError,
-       _onDeadLetter = onDeadLetter;
+  })  : _backoffBase = backoffBase,
+        _backoffCap = backoffCap,
+        _backoffJitter = backoffJitter,
+        _onError = onError,
+        _onDeadLetter = onDeadLetter;
 
   /// Worker ids currently claimed in this isolate, as `host:port|prefix|id`.
   /// Guards against two live workers sharing an in-flight list; see [connect].
@@ -518,11 +518,11 @@ return 0
 
   /// The run in progress, as the handler and the observers both see it.
   TaskContext _contextFor(Envelope env) => TaskContext(
-    id: env.id,
-    queue: env.queue,
-    attempt: env.attempt + 1,
-    maxAttempts: env.maxRetries + 1,
-  );
+        id: env.id,
+        queue: env.queue,
+        attempt: env.attempt + 1,
+        maxAttempts: env.maxRetries + 1,
+      );
 
   Future<void> _retryOrDeadLetter(
     String raw,
@@ -557,8 +557,7 @@ return 0
     // immediately: score it with the time it becomes due and drop it in the
     // queue's delayed set, atomically with removing it from the in-flight list.
     // The run loop's mover promotes it once due.
-    final dueAt =
-        DateTime.now().millisecondsSinceEpoch +
+    final dueAt = DateTime.now().millisecondsSinceEpoch +
         _backoffFor(env.attempt).inMilliseconds;
     await _send([
       'EVAL',

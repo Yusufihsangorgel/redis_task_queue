@@ -34,7 +34,6 @@ final class QueueStats {
   int get totalDelayed => delayed.values.fold(0, (a, b) => a + b);
 
   @override
-  String toString() =>
-      'QueueStats(pending: $totalPending, inFlight: '
+  String toString() => 'QueueStats(pending: $totalPending, inFlight: '
       '$inFlight, delayed: $totalDelayed, deadLetter: $deadLetter)';
 }

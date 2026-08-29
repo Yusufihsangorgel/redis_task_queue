@@ -161,8 +161,7 @@ void main() {
     expect(
       gotFirst,
       isTrue,
-      reason:
-          'baseline: the worker must process a task before its '
+      reason: 'baseline: the worker must process a task before its '
           'connection is severed',
     );
 
@@ -184,8 +183,7 @@ void main() {
     expect(
       gotSecond,
       isTrue,
-      reason:
-          'the worker must keep processing after its connection is '
+      reason: 'the worker must keep processing after its connection is '
           'severed, not die or get stuck',
     );
 

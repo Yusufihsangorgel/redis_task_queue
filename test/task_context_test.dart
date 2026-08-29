@@ -22,22 +22,23 @@ Future<void> _flush() async {
 }
 
 Future<Worker> _worker() => Worker.connect(
-  host: redisHost,
-  port: redisPort,
-  prefix: _prefix,
-  queues: {'default': 1},
-  workerId: _workerId,
-  // Retries are the subject here, so don't spend real backoff waiting.
-  backoffBase: const Duration(milliseconds: 5),
-  backoffCap: const Duration(milliseconds: 20),
-);
+      host: redisHost,
+      port: redisPort,
+      prefix: _prefix,
+      queues: {'default': 1},
+      workerId: _workerId,
+      // Retries are the subject here, so don't spend real backoff waiting.
+      backoffBase: const Duration(milliseconds: 5),
+      backoffCap: const Duration(milliseconds: 20),
+    );
 
 void main() {
   requireRedis();
 
   setUp(_flush);
 
-  test('the handler sees the id enqueue returned, unchanged across retries', () async {
+  test('the handler sees the id enqueue returned, unchanged across retries',
+      () async {
     final client = await QueueClient.connect(
       host: redisHost,
       port: redisPort,

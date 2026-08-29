@@ -357,7 +357,8 @@ void main() {
     await worker.close();
   });
 
-  test('onError fires on each failure and onDeadLetter fires terminally', () async {
+  test('onError fires on each failure and onDeadLetter fires terminally',
+      () async {
     final client = await QueueClient.connect(
       host: redisHost,
       port: redisPort,
@@ -415,7 +416,8 @@ void main() {
     await worker.close();
   });
 
-  test('the worker gives each queue first look in proportion to its weight', () async {
+  test('the worker gives each queue first look in proportion to its weight',
+      () async {
     final client = await QueueClient.connect(
       host: redisHost,
       port: redisPort,

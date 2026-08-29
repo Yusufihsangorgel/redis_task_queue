@@ -43,9 +43,8 @@ Future<void> main(List<String> args) async {
 }
 
 Future<void> _round({required bool dedup}) async {
-  final label = dedup
-      ? 'a handler keyed off the task id'
-      : 'a handler with no defence';
+  final label =
+      dedup ? 'a handler keyed off the task id' : 'a handler with no defence';
   print('== $label ==');
 
   _ledger().writeAsStringSync('');

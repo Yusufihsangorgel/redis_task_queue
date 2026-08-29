@@ -46,7 +46,9 @@ void main() {
 
   setUp(_flush);
 
-  test('a running task is held on the in-flight list, not lost, until it finishes', () async {
+  test(
+      'a running task is held on the in-flight list, not lost, until it finishes',
+      () async {
     final client = await QueueClient.connect(
       host: redisHost,
       port: redisPort,
@@ -104,7 +106,8 @@ void main() {
     await worker.close();
   });
 
-  test('a worker recovers tasks a previous run left in flight when it died', () async {
+  test('a worker recovers tasks a previous run left in flight when it died',
+      () async {
     // Stand in for a worker that claimed a task and died before finishing it:
     // seed the in-flight list with an envelope, exactly as an interrupted claim
     // would have left it.
@@ -158,7 +161,8 @@ void main() {
     await worker.close();
   });
 
-  test('another worker\'s in-flight list is left untouched during recovery', () async {
+  test('another worker\'s in-flight list is left untouched during recovery',
+      () async {
     // A live peer with a different id is mid-task: its in-flight list must not
     // be reclaimed by this worker's startup recovery.
     final seed = await _connect();
