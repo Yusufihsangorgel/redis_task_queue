@@ -6,10 +6,10 @@ issue_tracker: https://github.com/Yusufihsangorgel/redis_task_queue/issues
 
 topics:
   - redis
-  - queue
   - jobs
   - worker
-  - backend
+  - task-queue
+  - job-scheduling
 
 screenshots:
   - description: The enqueue to worker path, with retries and a dead-letter list.
