@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "package": "redis_task_queue",
+  "survey_digest": "f90f45c8a172068c3ed3b9488ba5a7cb4e58efa93c380d2d9a70b399349ec35e",
+  "items": [
+    {
+      "id": "redis_task_queue-D001",
+      "source_index": 1,
+      "source_item_digest": "f02c94a31b97cd488ef188fd11f4e426ec972e706312836972ab7cf034dad1c0",
+      "baseline_revision": "a19ad4b",
+      "status": "open",
+      "size": "small",
+      "locations": [
+        {
+          "path": "lib/src/client.dart",
+          "lines": "235,249-250"
+        },
+        {
+          "path": "lib/src/keys.dart",
+          "lines": "1-31"
+        }
+      ],
+      "kind": "duplicated logic / single-source violation",
+      "observation": "`stats()` and `_discoverQueues()` rebuild the key scheme by hand (`${prefix}:inflight:*`, `:queue:`, `:delayed`). If the keys.dart scheme changes, statistics silently count wrong.",
+      "certainty": "confirmed",
+      "proposed_fix": "Add `inFlightPattern()`, `queuePattern()` and `queueOf(String key)`, which extracts the queue name from a key, to keys.dart; have the client use them; write a pure keys test without Redis.",
+      "related_rule_ids": [
+        "redis_task_queue/RTQ-1",
+        "redis_task_queue/RTQ-7"
+      ],
+      "issue_url": null,
+      "closure_criteria": "client.dart builds every key through the new Keys helpers and spells no raw fragment such as :queue: or :inflight:. A pure keys test that runs without Redis covers the helpers and passes.",
+      "review_trigger": "Before modifying the affected code",
+      "resolution": null
+    },
+    {
+      "id": "redis_task_queue-D002",
+      "source_index": 2,
+      "source_item_digest": "1bf4185361a517b83a22084dc861f4a461ee87e72e9ab727797eefb646a04b5b",
+      "baseline_revision": "a19ad4b",
+      "status": "open",
+      "size": "medium",
+      "locations": [
+        {
+          "path": "lib/src/client.dart",
+          "lines": "56-57,75-93"
+        },
+        {
+          "path": "lib/src/worker.dart",
+          "lines": "269-305"
+        }
+      ],
+      "kind": "duplicated logic",
+      "observation": "`_dial` and `_send`, which reconnects once and wraps with `wrapRedisError`, are nearly line-for-line identical in the two classes; worker.dart:281 says 'Same rationale as [QueueClient._send]'. A fix can land on only one side.",
+      "certainty": "confirmed",
+      "proposed_fix": "A small class that holds host/port/Command in a non-exported lib/src/connection.dart (send, reconnect, close); QueueClient and Worker delegate to it. test/connection_drop_test.dart already runs both paths.",
+      "related_rule_ids": [
+        "redis_task_queue/RTQ-3",
+        "redis_task_queue/RTQ-6"
+      ],
+      "issue_url": null,
+      "closure_criteria": "QueueClient and Worker delegate dialing and sending to one non-exported connection.dart class. test/connection_drop_test.dart still passes over both paths.",
+      "review_trigger": "Before modifying the affected code",
+      "resolution": null
+    },
+    {
+      "id": "redis_task_queue-D003",
+      "source_index": 3,
+      "source_item_digest": "cc762061511bbf506cb0954000476a3a4762b38bb118f56509dbb8db5082c340",
+      "baseline_revision": "a19ad4b",
+      "status": "open",
+      "size": "small",
+      "locations": [
+        {
+          "path": "lib/src/client.dart",
+          "lines": "202-206"
+        }
+      ],
+      "kind": "atomicity / correctness",
+      "observation": "`purgeDeadLetters` sends LLEN first and DEL second. A record the worker LPUSHes in between is deleted but not counted; the returned count under-reports the deletions. This violates RTQ-2.",
+      "certainty": "confirmed",
+      "proposed_fix": "A single EVAL script (`local n = redis.call('LLEN', KEYS[1]) redis.call('DEL', KEYS[1]) return n`) as `static const _purgeScript`; add a count test to dead_letter_admin_test.",
+      "related_rule_ids": [
+        "redis_task_queue/RTQ-2"
+      ],
+      "issue_url": null,
+      "closure_criteria": "purgeDeadLetters deletes and counts the list in one atomic _purgeScript EVAL. The new count test in dead_letter_admin_test passes.",
+      "review_trigger": "Before modifying the affected code",
+      "resolution": null
+    },
+    {
+      "id": "redis_task_queue-D004",
+      "source_index": 4,
+      "source_item_digest": "1c31b35045ae4e1c1917f86df4197a7f15757ca89c34ff730867ee4ea2cab328",
+      "baseline_revision": "a19ad4b",
+      "status": "open",
+      "size": "medium",
+      "locations": [
+        {
+          "path": "lib/src/worker.dart",
+          "lines": "365-381,462-464,494"
+        }
+      ],
+      "kind": "mixed error classes (poison message)",
+      "observation": "Inside `_process`, when `Envelope.decode` throws on a corrupt envelope, the loop's catch-all branch mistakes it for a lost connection: it sleeps for backoffBase, reconnects, and recovery skips the corrupt record with `continue`. The record stays in the in-flight list forever and inflates `stats().inFlight`. Found by reading the code; not reproduced by a run.",
+      "certainty": "probable",
+      "proposed_fix": "Catch decode separately in `_process` with `on FormatException`/`on TypeError`, move the raw record to dead-letter through `_deadScript` with the error text; narrow the loop catch to `on TaskQueueException`; add an integration test that LPUSHes a corrupt record.",
+      "related_rule_ids": [
+        "redis_task_queue/RTQ-2",
+        "redis_task_queue/RTQ-13"
+      ],
+      "issue_url": null,
+      "closure_criteria": "A corrupt record LPUSHed to the in-flight list moves to dead-letter through _deadScript with the decode error text and no longer inflates stats().inFlight. The new integration test that LPUSHes a corrupt record passes.",
+      "review_trigger": "Before modifying the affected code",
+      "resolution": null
+    },
+    {
+      "id": "redis_task_queue-D005",
+      "source_index": 5,
+      "source_item_digest": "c87b9db8cef83e62291ccb73aebeed8a22e5c0d2b24c84bde20b720a509bbf52",
+      "baseline_revision": "a19ad4b",
+      "status": "open",
+      "size": "small",
+      "locations": [
+        {
+          "path": "lib/src/client.dart",
+          "lines": "82"
+        },
+        {
+          "path": "lib/src/worker.dart",
+          "lines": "294,365,379,462,508,600"
+        }
+      ],
+      "kind": "untyped catch (J10/D11)",
+      "observation": "Seven bare `catch` blocks. Some are deliberate catch-alls (observer isolation at 600, handler error at 508) but none uses `on Object`; 462 should handle only decode errors.",
+      "certainty": "confirmed",
+      "proposed_fix": "`on Object catch` plus the existing rationale comment; narrow 462 to `on FormatException` and 365 via RTQ-B4.",
+      "related_rule_ids": [
+        "redis_task_queue/RTQ-13"
+      ],
+      "issue_url": null,
+      "closure_criteria": "No bare catch remains at the listed lines and each uses a typed on clause or on Object with a rationale comment. The package tests still pass.",
+      "review_trigger": "Before modifying the affected code",
+      "resolution": null
+    },
+    {
+      "id": "redis_task_queue-D006",
+      "source_index": 6,
+      "source_item_digest": "c6d04941b7e433c018c56b76910e37409f792f0713845c09860227df06b57eee",
+      "baseline_revision": "a19ad4b",
+      "status": "open",
+      "size": "small",
+      "locations": [
+        {
+          "path": "lib/src/task.dart",
+          "lines": "89-95"
+        }
+      ],
+      "kind": "duplicated logic",
+      "observation": "The envelope JSON map is written twice, in `encode` and in `encodeDead`; when a field is added, a dead-letter record can still be written in the old shape.",
+      "certainty": "confirmed",
+      "proposed_fix": "A private `Map<String, Object?> _toJson()`; both use it. wire_format_test already pins the output.",
+      "related_rule_ids": [
+        "redis_task_queue/RTQ-5"
+      ],
+      "issue_url": null,
+      "closure_criteria": "encode and encodeDead build their JSON map through one private _toJson. wire_format_test still passes.",
+      "review_trigger": "Before modifying the affected code",
+      "resolution": null
+    },
+    {
+      "id": "redis_task_queue-D007",
+      "source_index": 7,
+      "source_item_digest": "23145be30f79be6a75dd45ebf1dec4d906ae7ad45049b2a3832f46a13391004a",
+      "baseline_revision": "a19ad4b",
+      "status": "open",
+      "size": "medium",
+      "locations": [
+        {
+          "path": "lib/src/task.dart",
+          "lines": "166-168"
+        },
+        {
+          "path": "lib/redis_task_queue.dart",
+          "lines": "14"
+        }
+      ],
+      "kind": "leaking public API",
+      "observation": "`DeadLetter.decode(String raw)` is public and exposed through `show DeadLetter`: wire format parsing has entered the user API. Only wire_format_test, which imports lib and src, uses it.",
+      "certainty": "confirmed",
+      "proposed_fix": "Now: a non-API note in the dartdoc + CHANGELOG. Next major: move it to a function inside src. `package:meta` @internal would add a dependency and is rejected because of RTQ-8.",
+      "related_rule_ids": [
+        "redis_task_queue/RTQ-6",
+        "redis_task_queue/RTQ-8"
+      ],
+      "issue_url": null,
+      "closure_criteria": "The dartdoc and the CHANGELOG mark DeadLetter.decode as not part of the API. The next major version moves it to a function inside src that the show list does not export.",
+      "review_trigger": "Before modifying the affected code",
+      "resolution": null
+    },
+    {
+      "id": "redis_task_queue-D008",
+      "source_index": 8,
+      "source_item_digest": "f930cf4cbe4f586c388db1f8a0ad0d3c6f3757f1dac9c62ee4d9c8496162e449",
+      "baseline_revision": "a19ad4b",
+      "status": "open",
+      "size": "small",
+      "locations": [
+        {
+          "path": "lib/src/worker.dart",
+          "lines": "189,224-227,313-321"
+        }
+      ],
+      "kind": "documented range not validated",
+      "observation": "`backoffJitter` is 0..1 in the dartdoc but is not validated; a weight of ≤0 silently drops out of queue sweeping; `backoffBase > backoffCap` is accepted. workerId is validated (231-233).",
+      "certainty": "confirmed",
+      "proposed_fix": "`ArgumentError.value` checks at the start of `Worker.connect` + tests.",
+      "related_rule_ids": [
+        "redis_task_queue/RTQ-3",
+        "redis_task_queue/RTQ-14"
+      ],
+      "issue_url": null,
+      "closure_criteria": "Worker.connect throws ArgumentError.value for backoffJitter outside 0..1, for weights of zero or less and for backoffBase above backoffCap. The new argument tests pass.",
+      "review_trigger": "Before modifying the affected code",
+      "resolution": null
+    },
+    {
+      "id": "redis_task_queue-D009",
+      "source_index": 9,
+      "source_item_digest": "2159dc60452875521a1e6dae1b8ff269d9707e21b412a09cba19df293140a0f9",
+      "baseline_revision": "a19ad4b",
+      "status": "open",
+      "size": "small",
+      "locations": [
+        {
+          "path": ".github/workflows/ci.yml",
+          "lines": "39-43"
+        }
+      ],
+      "kind": "CI gap",
+      "observation": "The `dart format --output=none --set-exit-if-changed .` step that the three sibling packages have is missing; two past 'Reformat' commits show that format drift has happened.",
+      "certainty": "confirmed",
+      "proposed_fix": "Add a format step before analyze.",
+      "related_rule_ids": [],
+      "issue_url": null,
+      "closure_criteria": "ci.yml runs dart format --output=none --set-exit-if-changed before the analyze step. The format step passes on a clean checkout.",
+      "review_trigger": "Before modifying the affected code",
+      "resolution": null
+    },
+    {
+      "id": "redis_task_queue-D010",
+      "source_index": 10,
+      "source_item_digest": "8f692ba5a0e093f8d08aea436a44ac14e0a5ceb94b752d9147694119e2b7ef4c",
+      "baseline_revision": "a19ad4b",
+      "status": "open",
+      "size": "medium",
+      "locations": [
+        {
+          "path": "analysis_options.yaml",
+          "lines": "1"
+        },
+        {
+          "path": "lib/src/client.dart",
+          "lines": "283"
+        },
+        {
+          "path": "lib/src/task.dart",
+          "lines": "9,17,19,143"
+        }
+      ],
+      "kind": "lint / documentation debt",
+      "observation": "Only lints/recommended; resilience and flutter_prerender enable strict-casts/inference/raw-types, public_member_api_docs and unawaited_futures. Undocumented public members (`close`, the `Task` constructor, `toJson`, `fromJson`) and an unresolved dartdoc reference `[enqueue]` (task.dart:143; the correct form is `[QueueClient.enqueue]`). The `Future<dynamic>` return of `_send` can produce findings in strict modes.",
+      "certainty": "confirmed",
+      "proposed_fix": "Enable the resilience set and close the findings in the same change.",
+      "related_rule_ids": [
+        "redis_task_queue/RTQ-14"
+      ],
+      "issue_url": null,
+      "closure_criteria": "analysis_options.yaml enables the strict lint set and dart analyze reports no findings. Every public member named in the item has dartdoc and the task.dart reference resolves to [QueueClient.enqueue].",
+      "review_trigger": "Before modifying the affected code",
+      "resolution": null
+    }
+  ]
+}

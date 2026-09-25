@@ -115,3 +115,7 @@ command.
 Without Redis: `dart run example/no_redis_demo.dart` walks three attempts of
 the `TaskContext` contract. Other examples need Redis on 6379 (or `REDIS_PORT`):
 `dart run example/redis_task_queue_example.dart worker` then `... enqueue`.
+
+## Contributing
+
+Before changing this repository, read [CONTRIBUTING.md](CONTRIBUTING.md), [package engineering rules](docs/engineering/package.md), and the [debt register](docs/engineering/debt.json). These requirements apply to every contributor. The usage guidance above remains the consumer contract.
