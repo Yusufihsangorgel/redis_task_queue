@@ -4,6 +4,7 @@
 - Docs: `example/README.md` no longer says the worker id defaults to the host name. It has no default.
 - Docs: the stem_redis paragraph in the README now describes only this package.
 - Docs: removed source line numbers from the README that no longer matched the code.
+- Docs: the README section on choosing this package over a `BRPOP` loop now also says when a plain `BRPOP` loop is the better fit.
 
 ## 1.1.4
 

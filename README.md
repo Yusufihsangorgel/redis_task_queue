@@ -32,6 +32,30 @@ back to a one-second `BLMOVE` on the top-weight queue only once every queue
 comes up empty. A worker that restarts reads its own list back with `LRANGE`
 and requeues whatever is still sitting there.
 
+Pick this package over a hand-written `BRPOP` loop when:
+
+- A task must survive the worker dying in the middle of the handler. A worker
+  restarted under the same id requeues what is left on its in-flight list.
+- A failing handler should be retried after a growing delay, up to the task's
+  `maxRetries`, with jitter added to the wait.
+- A task that keeps failing should be kept where you can read its error. After
+  the last retry it goes to the dead-letter list, and `QueueClient` can list,
+  replay or purge those entries.
+- Several queues share one worker and a busy queue must not starve the others.
+  The Redis docs say `BRPOP` on several keys pops from the first non-empty key
+  in the order you gave. A busy first key always wins. Here the queue weights
+  decide how often each queue gets first look.
+
+Stay with a plain `BRPOP` loop when:
+
+- The job is a one-off script, or losing a task when the process dies is fine
+  because you can simply run the script again.
+- You want at-most-once behavior. A task popped by `BRPOP` runs once or, after
+  a crash, not at all. With this package a task can run twice. Handlers must be
+  idempotent.
+- You want no worker ids to manage. Recovery here needs an id that is stable
+  across restarts and unique per worker (see "Recovery and worker ids").
+
 **Instead of stem_redis.** This package depends only on `redis` and provides
 worker recovery, retries, and dead-letter management. For how `stem_redis`
 compares, read its own documentation.
