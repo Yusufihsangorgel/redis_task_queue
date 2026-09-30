@@ -234,13 +234,13 @@ worker only finds its orphans if it comes back under the same id.
 ```dart
 // A pod name from the environment: stable across restarts, unique per worker.
 final worker = await Worker.connect(
-  workerId: Platform.environment['HOSTNAME'],
+  workerId: Platform.environment['HOSTNAME'] ?? 'worker-1',
 );
 ```
 
-The default is the host name, which is right for a process pinned to a machine
-and right for a Kubernetes StatefulSet. It is wrong for a random UUID generated
-at startup: every restart would begin a fresh, empty in-flight list and leave
+`Worker.connect` requires a `workerId`. Choose a stable id that is unique to
+each worker, such as a StatefulSet pod name. A random UUID generated at startup
+is wrong: every restart would begin a fresh, empty in-flight list and leave
 the previous one orphaned forever. Two workers must never share an id.
 
 ### Handlers have to be idempotent
@@ -273,6 +273,7 @@ callbacks are where it does:
 
 ```dart
 final worker = await Worker.connect(
+  workerId: 'worker-1',
   onError: (task, context, error, stack) {
     log.warning('${task.type} ${context.id} failed on attempt '
         '${context.attempt} of ${context.maxAttempts}');

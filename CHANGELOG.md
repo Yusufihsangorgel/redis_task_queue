@@ -1,3 +1,10 @@
+## 1.1.5
+
+- Docs: the `example/README.md` snippets now pass the required `workerId` to `Worker.connect`.
+- Docs: `example/README.md` no longer says the worker id defaults to the host name. It has no default.
+- Docs: the stem_redis paragraph in the README now describes only this package.
+- Docs: removed source line numbers from the README that no longer matched the code.
+
 ## 1.1.4
 
 - New `example/backend.dart`, the wiring a dart_frog or shelf reader

@@ -27,19 +27,14 @@ id recovers and finishes it](https://raw.githubusercontent.com/Yusufihsangorgel/
 it returns it. Kill the worker between that line and the end of your handler
 and the task is gone, because nothing else holds a copy. This package claims a
 task with `LMOVE`/`BLMOVE ... RIGHT LEFT` onto a list keyed by worker id: a
-non-blocking sweep across the weighted queues tries `LMOVE` first
-(`worker.dart:427`), falling back to a one-second `BLMOVE` on the top-weight
-queue only once every queue comes up empty (`worker.dart:432`). A worker that
-restarts reads its own list back with `LRANGE` and requeues whatever is still
-sitting there (`worker.dart:446`).
+non-blocking sweep across the weighted queues tries `LMOVE` first, falling
+back to a one-second `BLMOVE` on the top-weight queue only once every queue
+comes up empty. A worker that restarts reads its own list back with `LRANGE`
+and requeues whatever is still sitting there.
 
-**Instead of stem_redis.** No honest difference to report. It answers the same
-problem with Redis Streams consumer groups, and it has a dead-letter store with
-replay and purge (`redis_broker.dart:977`, `1037`, `1088`). I looked for a
-defect in it and did not find one. What is checkable is packaging: `stem_redis`
-depends on `stem`, a larger job platform (its `pubspec.yaml` pins
-`stem: ">=0.2.1 <0.3.0"`), where this package depends only on `redis`. If you
-already run `stem`, its broker is the right answer.
+**Instead of stem_redis.** This package depends only on `redis` and provides
+worker recovery, retries, and dead-letter management. For how `stem_redis`
+compares, read its own documentation.
 
 ## Reach for it when
 
