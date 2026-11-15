@@ -9,9 +9,10 @@ crash-safe at-least-once delivery: a task a worker was running when it died is
 recovered on restart, not lost.
 
 If you've used [Asynq](https://github.com/hibiken/asynq) in Go or Sidekiq in
-Ruby, the model will feel familiar. Dart server frameworks (Serverpod,
-Dart Frog, Shelf) don't have a maintained equivalent; this fills that gap
-with a deliberately small surface.
+Ruby, the model will feel familiar. Serverpod's future calls cover delayed
+work that is stored in its database and runs at least once, but retries are
+left to you. This package is a Redis-backed queue with retries, a dead-letter
+list and weighted queues, and it works with any Dart server.
 
 The path a task takes, end to end:
 

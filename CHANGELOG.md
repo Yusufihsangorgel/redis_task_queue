@@ -5,6 +5,7 @@
 - Docs: the stem_redis paragraph in the README now describes only this package.
 - Docs: removed source line numbers from the README that no longer matched the code.
 - Docs: the README section on choosing this package over a `BRPOP` loop now also says when a plain `BRPOP` loop is the better fit.
+- Docs: the README no longer says Dart server frameworks lack a maintained equivalent. It now says what Serverpod's future calls cover and where this package differs.
 
 ## 1.1.4
 
